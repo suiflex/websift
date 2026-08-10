@@ -1,0 +1,329 @@
+//! Validated process configuration.
+
+use std::{
+    env,
+    path::{Path, PathBuf},
+};
+
+const DEFAULT_TIMEOUT_MS: u64 = 10_000;
+const DEFAULT_MAX_RESULTS: u32 = 10;
+const DEFAULT_MAX_BYTES: u64 = 2_000_000;
+const DEFAULT_CRAWL_CONCURRENCY: u16 = 4;
+const DEFAULT_SPOOL_ROOT: &str = "/tmp/mcp-search-spool";
+const DEFAULT_PER_HOST_CONCURRENCY: u16 = 2;
+const DATA_DIR_ENV: &str = "MCP_SEARCH_DATA_DIR";
+
+/// Configuration selected when the process starts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Config {
+    pub profile: String,
+    pub searxng_url: Option<String>,
+    pub timeout_ms: u64,
+    pub max_results: u32,
+    pub max_bytes: u64,
+    pub crawl_concurrency: u16,
+    pub per_host_concurrency: u16,
+    pub browser: BrowserMode,
+    pub spool_root: PathBuf,
+    pub worker_program: PathBuf,
+    pub worker_args: Vec<String>,
+    pub data_dir: PathBuf,
+}
+
+/// Browser-worker policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowserMode {
+    Auto,
+    Enabled,
+    Disabled,
+}
+
+impl Config {
+    /// Load and validate environment-backed configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when an environment variable is malformed or outside its supported bounds.
+    pub fn from_env() -> Result<Self, String> {
+        Self::from_env_with_profile(None)
+    }
+
+    /// Load environment configuration, optionally overriding its profile from the CLI.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when either the environment or CLI profile is invalid.
+    pub fn from_env_with_profile(profile_override: Option<&str>) -> Result<Self, String> {
+        let mut config = Self::from_lookup(|key| env::var(key).ok())?;
+        if let Some(profile) = profile_override {
+            config.profile = crate::application::RuntimeStatus::new(profile)
+                .map_err(str::to_owned)?
+                .profile;
+        }
+        Ok(config)
+    }
+
+    fn from_lookup(mut lookup: impl FnMut(&str) -> Option<String>) -> Result<Self, String> {
+        let profile = lookup("MCP_SEARCH_PROFILE").unwrap_or_else(|| "default".to_owned());
+        let profile = crate::application::RuntimeStatus::new(&profile)
+            .map_err(str::to_owned)?
+            .profile;
+        let searxng_url = lookup("MCP_SEARCH_SEARXNG_URL")
+            .map(|value| {
+                crate::policy::PublicUrl::parse(&value)
+                    .map(|url| url.as_str().to_owned())
+                    .map_err(|error| format!("MCP_SEARCH_SEARXNG_URL is invalid: {error:?}"))
+            })
+            .transpose()?;
+        let timeout_ms = parse_timeout_ms(&mut lookup)?;
+        let max_results = parse_u32(
+            &mut lookup,
+            "MCP_SEARCH_MAX_RESULTS",
+            DEFAULT_MAX_RESULTS,
+            1,
+            50,
+        )?;
+        let max_bytes = parse_u64(
+            &mut lookup,
+            "MCP_SEARCH_MAX_BYTES",
+            DEFAULT_MAX_BYTES,
+            1,
+            100_000_000,
+        )?;
+        let crawl_concurrency = parse_u16(
+            &mut lookup,
+            "MCP_SEARCH_CRAWL_CONCURRENCY",
+            DEFAULT_CRAWL_CONCURRENCY,
+            1,
+            32,
+        )?;
+        let per_host_concurrency = parse_u16(
+            &mut lookup,
+            "MCP_SEARCH_PER_HOST_CONCURRENCY",
+            DEFAULT_PER_HOST_CONCURRENCY,
+            1,
+            32,
+        )?;
+        let browser = match lookup("MCP_SEARCH_BROWSER").as_deref().unwrap_or("auto") {
+            "auto" => BrowserMode::Auto,
+            "enabled" => BrowserMode::Enabled,
+            "disabled" => BrowserMode::Disabled,
+            value => return Err(format!("MCP_SEARCH_BROWSER has unsupported value: {value}")),
+        };
+        let spool_root = lookup("MCP_SEARCH_SPOOL_ROOT")
+            .map_or_else(|| PathBuf::from(DEFAULT_SPOOL_ROOT), PathBuf::from);
+        validate_path("MCP_SEARCH_SPOOL_ROOT", &spool_root)?;
+        let worker_program = lookup("MCP_SEARCH_WORKER_PROGRAM")
+            .map_or_else(|| PathBuf::from("node"), PathBuf::from);
+        validate_path("MCP_SEARCH_WORKER_PROGRAM", &worker_program)?;
+        let worker_args = lookup("MCP_SEARCH_WORKER_ARGS").map_or_else(
+            || {
+                vec![
+                    "--experimental-strip-types".to_owned(),
+                    "browser-worker/src/main.ts".to_owned(),
+                ]
+            },
+            |value| value.split('\u{1f}').map(str::to_owned).collect(),
+        );
+        if worker_args.len() > 16 || worker_args.iter().any(|arg| arg.len() > 1024) {
+            return Err("MCP_SEARCH_WORKER_ARGS is invalid".to_owned());
+        }
+        let data_dir = lookup(DATA_DIR_ENV).map_or_else(default_data_dir, PathBuf::from);
+        validate_path(DATA_DIR_ENV, &data_dir)?;
+
+        Ok(Self {
+            profile,
+            searxng_url,
+            timeout_ms,
+            max_results,
+            max_bytes,
+            crawl_concurrency,
+            per_host_concurrency,
+            browser,
+            spool_root,
+            worker_program,
+            worker_args,
+            data_dir,
+        })
+    }
+}
+
+fn default_data_dir() -> PathBuf {
+    if cfg!(target_os = "macos") {
+        env::var_os("HOME").map_or_else(
+            || PathBuf::from("/tmp/mcp-search"),
+            |home| PathBuf::from(home).join("Library/Application Support/mcp-search"),
+        )
+    } else if cfg!(target_os = "windows") {
+        env::var_os("LOCALAPPDATA").map_or_else(
+            || PathBuf::from("mcp-search"),
+            |dir| PathBuf::from(dir).join("mcp-search"),
+        )
+    } else {
+        env::var_os("XDG_DATA_HOME")
+            .or_else(|| {
+                env::var_os("HOME")
+                    .map(|home| PathBuf::from(home).join(".local/share").into_os_string())
+            })
+            .map_or_else(
+                || PathBuf::from("/tmp/mcp-search"),
+                |dir| PathBuf::from(dir).join("mcp-search"),
+            )
+    }
+}
+
+fn validate_path(key: &str, path: &Path) -> Result<(), String> {
+    if path.as_os_str().is_empty() || path.to_string_lossy().len() > 512 {
+        return Err(format!("{key} is invalid"));
+    }
+    Ok(())
+}
+
+fn parse_timeout_ms(lookup: &mut impl FnMut(&str) -> Option<String>) -> Result<u64, String> {
+    let key = if lookup("MCP_SEARCH_TIMEOUT").is_some() {
+        "MCP_SEARCH_TIMEOUT"
+    } else {
+        "MCP_SEARCH_TIMEOUT_MS"
+    };
+    let Some(value) = lookup(key) else {
+        return Ok(DEFAULT_TIMEOUT_MS);
+    };
+    if let Some(seconds) = value.strip_suffix('s') {
+        let seconds = seconds
+            .parse::<u64>()
+            .map_err(|_| format!("{key} must be a duration"))?;
+        return seconds
+            .checked_mul(1_000)
+            .filter(|milliseconds| (1..=300_000).contains(milliseconds))
+            .ok_or_else(|| format!("{key} must be between 1ms and 300s"));
+    }
+    let parsed = value
+        .parse::<u64>()
+        .map_err(|_| format!("{key} must be a number or duration"))?;
+    if !(1..=300_000).contains(&parsed) {
+        return Err(format!("{key} must be between 1ms and 300s"));
+    }
+    Ok(parsed)
+}
+
+fn parse_u64(
+    lookup: &mut impl FnMut(&str) -> Option<String>,
+    key: &str,
+    default: u64,
+    min: u64,
+    max: u64,
+) -> Result<u64, String> {
+    parse_number(lookup, key, default, min, max)
+}
+
+fn parse_u32(
+    lookup: &mut impl FnMut(&str) -> Option<String>,
+    key: &str,
+    default: u32,
+    min: u32,
+    max: u32,
+) -> Result<u32, String> {
+    parse_number(lookup, key, default, min, max)
+}
+
+fn parse_u16(
+    lookup: &mut impl FnMut(&str) -> Option<String>,
+    key: &str,
+    default: u16,
+    min: u16,
+    max: u16,
+) -> Result<u16, String> {
+    parse_number(lookup, key, default, min, max)
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn parse_number<T>(
+    lookup: &mut impl FnMut(&str) -> Option<String>,
+    key: &str,
+    default: T,
+    min: T,
+    max: T,
+) -> Result<T, String>
+where
+    T: std::str::FromStr + PartialOrd + std::fmt::Display + Copy,
+{
+    let Some(value) = lookup(key) else {
+        return Ok(default);
+    };
+    let parsed = value
+        .parse::<T>()
+        .map_err(|_| format!("{key} must be a number"))?;
+    if parsed < min || parsed > max {
+        return Err(format!("{key} must be between {min} and {max}"));
+    }
+    Ok(parsed)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::{BrowserMode, Config};
+
+    fn config(values: &[(&str, &str)]) -> Result<Config, String> {
+        Config::from_lookup(|key| {
+            values
+                .iter()
+                .find(|(name, _)| *name == key)
+                .map(|(_, value)| (*value).to_owned())
+        })
+    }
+
+    #[test]
+    fn applies_safe_defaults() {
+        let value = config(&[]).unwrap();
+        assert_eq!(value.profile, "default");
+        assert_eq!(value.browser, BrowserMode::Auto);
+        assert_eq!(value.max_results, 10);
+    }
+
+    #[test]
+    fn rejects_out_of_bounds_values() {
+        assert!(config(&[("MCP_SEARCH_MAX_RESULTS", "51")]).is_err());
+        assert!(config(&[("MCP_SEARCH_BROWSER", "maybe")]).is_err());
+        assert!(config(&[("MCP_SEARCH_SEARXNG_URL", "http://127.0.0.1")]).is_err());
+    }
+
+    #[test]
+    fn accepts_duration_timeout() {
+        assert_eq!(
+            config(&[("MCP_SEARCH_TIMEOUT", "30s")]).unwrap().timeout_ms,
+            30_000
+        );
+    }
+
+    #[test]
+    fn parses_explicit_data_directory_and_rejects_empty_path() {
+        assert_eq!(
+            config(&[("MCP_SEARCH_DATA_DIR", "/var/lib/mcp-search")])
+                .unwrap()
+                .data_dir,
+            PathBuf::from("/var/lib/mcp-search")
+        );
+        assert!(config(&[("MCP_SEARCH_DATA_DIR", "")]).is_err());
+    }
+
+    #[test]
+    fn cli_profile_overrides_environment_profile_only() {
+        let config = Config::from_lookup(|key| match key {
+            "MCP_SEARCH_PROFILE" => Some("environment".to_owned()),
+            "MCP_SEARCH_MAX_RESULTS" => Some("25".to_owned()),
+            _ => None,
+        })
+        .unwrap();
+        assert_eq!(config.profile, "environment");
+        assert_eq!(config.max_results, 25);
+
+        let mut config = config;
+        config.profile = crate::application::RuntimeStatus::new("cli")
+            .unwrap()
+            .profile;
+        assert_eq!(config.profile, "cli");
+        assert_eq!(config.max_results, 25);
+    }
+}

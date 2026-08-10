@@ -1,0 +1,13 @@
+{
+  "name": "@mcp-search/browser-worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --experimental-strip-types --check src/main.ts && node --experimental-strip-types --check src/protocol.ts",
+    "test": "npm run check && node --experimental-strip-types --test test/protocol.test.ts"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}

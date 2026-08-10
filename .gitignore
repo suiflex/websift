@@ -1,0 +1,8 @@
+.DS_Store
+target/
+node_modules/
+browser-worker/dist/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.mcp-search/

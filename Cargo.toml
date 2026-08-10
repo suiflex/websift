@@ -1,0 +1,35 @@
+[package]
+name = "mcp-search"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+
+[lib]
+name = "mcp_search"
+
+[dependencies]
+futures-util = "0.3.31"
+reqwest = { version = "0.12.23", default-features = false, features = ["rustls-tls", "stream"] }
+scraper = "0.23.1"
+rmcp = { version = "3.1.2", default-features = false, features = ["macros", "server", "transport-io"] }
+schemars = "1.2.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.17"
+tokio = { version = "1.53.1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+url = "2.5.4"
+sha2 = "0.10.9"
+chrono = { version = "0.4.41", default-features = false, features = ["clock"] }
+rusqlite = { version = "0.37.0", features = ["bundled"] }
+
+[dev-dependencies]
+rmcp = { version = "3.1.2", default-features = false, features = ["client", "macros", "server", "transport-io"] }
+serde_json = "1.0.151"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"

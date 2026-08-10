@@ -1,0 +1,1 @@
+{"results":[{"title":"One","url":"https://example.com/article#fragment","content":"first","engine":"demo"},{"title":"Duplicate","url":"https://example.com/article","content":"duplicate"},{"title":"Two","url":"https://example.org/second","content":"second"},{"title":"Private","url":"http://127.0.0.1/private","content":"skip"}]}
