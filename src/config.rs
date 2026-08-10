@@ -63,7 +63,9 @@ impl Config {
         Ok(config)
     }
 
-    fn from_lookup(mut lookup: impl FnMut(&str) -> Option<String>) -> Result<Self, String> {
+    pub(crate) fn from_lookup(
+        mut lookup: impl FnMut(&str) -> Option<String>,
+    ) -> Result<Self, String> {
         let profile = lookup("MCP_SEARCH_PROFILE").unwrap_or_else(|| "default".to_owned());
         let profile = crate::application::RuntimeStatus::new(&profile)
             .map_err(str::to_owned)?

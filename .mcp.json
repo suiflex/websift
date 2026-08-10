@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "mcp-search": {
+      "command": "./target/debug/mcp-search",
+      "args": ["mcp", "--profile", "claude-code"]
+    }
+  }
+}

@@ -291,8 +291,15 @@ impl SearchClient {
                     terms.push_str(domain);
                 }
                 url.query_pairs_mut().append_pair("q", &terms);
-                if let Some(language) = &options.language {
-                    url.query_pairs_mut().append_pair("kl", language);
+                // The built-in backend keys on a region code such as `us-en`, not a bare language
+                // tag. Sending a bare tag would filter on a region that was never requested, so it
+                // is dropped rather than guessed.
+                if let Some(region) = options
+                    .language
+                    .as_deref()
+                    .filter(|value| value.contains('-'))
+                {
+                    url.query_pairs_mut().append_pair("kl", region);
                 }
                 if let Some(time_range) = &options.time_range
                     && let Some(code) = duckduckgo_time_range(time_range)
@@ -377,9 +384,14 @@ pub fn parse_duckduckgo(body: &[u8], max_results: usize) -> Result<Vec<SearchRes
         .select(&snippets)
         .map(|element| collapse_whitespace(&element.text().collect::<String>()))
         .collect();
+    let anchors: Vec<_> = document.select(&links).collect();
+    // Snippets are matched to results by position, which only holds while the page emits exactly
+    // one snippet per result. On any other shape the snippets are dropped: a missing snippet is
+    // recoverable for the caller, a snippet attached to the wrong result is not.
+    let aligned = snippets.len() == anchors.len();
     let mut seen = HashSet::new();
     let mut results = Vec::with_capacity(max_results);
-    for (index, anchor) in document.select(&links).enumerate() {
+    for (index, anchor) in anchors.into_iter().enumerate() {
         let Some(target) = anchor.value().attr("href").and_then(result_target) else {
             continue;
         };
@@ -393,7 +405,11 @@ pub fn parse_duckduckgo(body: &[u8], max_results: usize) -> Result<Vec<SearchRes
         results.push(SearchResult {
             title: collapse_whitespace(&anchor.text().collect::<String>()),
             url: normalized,
-            content: snippets.get(index).cloned().unwrap_or_default(),
+            content: if aligned {
+                snippets.get(index).cloned().unwrap_or_default()
+            } else {
+                String::new()
+            },
             engine: Some("duckduckgo".to_owned()),
         });
         if results.len() == max_results {
@@ -435,8 +451,27 @@ fn collapse_whitespace(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{SearchError, parse_duckduckgo, parse_response, result_target};
+    use super::{SearchClient, SearchError, parse_duckduckgo, parse_response, result_target};
+    use crate::config::Config;
     use reqwest::StatusCode;
+
+    #[test]
+    fn selects_builtin_backend_without_any_environment_variable() {
+        let config = Config::from_lookup(|_| None).unwrap();
+        assert!(config.searxng_url.is_none());
+        let client = SearchClient::from_config(&config).unwrap();
+        assert_eq!(client.provider(), "duckduckgo");
+    }
+
+    #[test]
+    fn configured_instance_replaces_the_builtin_backend() {
+        let config = Config::from_lookup(|key| {
+            (key == "MCP_SEARCH_SEARXNG_URL").then(|| "https://search.example.com".to_owned())
+        })
+        .unwrap();
+        let client = SearchClient::from_config(&config).unwrap();
+        assert_eq!(client.provider(), "searxng");
+    }
 
     #[test]
     fn parses_fixture_deduplicates_normalizes_and_limits() {
@@ -472,6 +507,21 @@ mod tests {
     fn limits_builtin_results() {
         let results = parse_duckduckgo(include_bytes!("fixtures/duckduckgo.html"), 1).unwrap();
         assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn drops_snippets_rather_than_attaching_them_to_the_wrong_result() {
+        // One result carries no snippet row, so positional pairing would shift every later
+        // snippet onto the preceding result.
+        let body = br#"<html><body><table>
+            <tr><td><a class="result-link" href="https://example.com/a">A</a></td></tr>
+            <tr><td><a class="result-link" href="https://example.org/b">B</a></td></tr>
+            <tr><td class="result-snippet">snippet for B</td></tr>
+        </table></body></html>"#;
+        let results = parse_duckduckgo(body, 10).unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].url, "https://example.com/a");
+        assert!(results.iter().all(|result| result.content.is_empty()));
     }
 
     #[test]
