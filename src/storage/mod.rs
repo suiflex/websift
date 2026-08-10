@@ -45,7 +45,7 @@ impl Store {
 
     pub fn open_in_memory() -> Result<Self> {
         let uri = format!(
-            "file:mcp-search-{}?mode=memory&cache=shared",
+            "file:websift-{}?mode=memory&cache=shared",
             NEXT_MEMORY_DB.fetch_add(1, Ordering::Relaxed)
         );
         let connection = Connection::open_with_flags(

@@ -1,7 +1,7 @@
 {
   "mcpServers": {
-    "mcp-search": {
-      "command": "./target/debug/mcp-search",
+    "websift": {
+      "command": "./target/debug/websift",
       "args": ["mcp", "--profile", "claude-code"]
     }
   }

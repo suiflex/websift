@@ -1,41 +1,49 @@
-# MCP Search — Installation and Distribution
+# Websift — Installation and Distribution
 
-Status: **source CLI available; packaging and installers remain unimplemented**  
-Last updated: 2026-08-10
+Status: **binary installers shipped; npm distribution and management CLI remain unimplemented**  
+Last updated: 2026-08-11
 
-> The repository currently runs from source with `cargo run -- mcp --profile <profile>`. Configuration/profile handling, native retrieval, extraction, search, mapping, crawl lifecycle, worker extraction, and embedded SQLite state are available in the source build. The source CLI also provides machine-readable `status`, `doctor`, and configuration-only `setup --lite` commands. Installers, npm distribution, browser/Playwright setup, client registration, full `setup`, `install`, cache, update, and purge commands are not shipped.
+> Released binaries are published for macOS, Linux, and Windows on x86_64 and aarch64, and the `install.sh` / `install.ps1` scripts install them with checksum verification. Configuration/profile handling, native retrieval, extraction, search, mapping, crawl lifecycle, worker extraction, and embedded SQLite state are available. The CLI provides machine-readable `status`, `doctor`, and configuration-only `setup --lite`. npm distribution, browser/Playwright setup, automatic client registration, full `setup`, `install`, cache, update, and purge commands are not shipped.
 
 ## 1. Installation promise
 
 A user should not need to understand Rust, TypeScript, Playwright, Chromium, SQLite, MCP JSON, or agent configuration.
 
-The target happy path is two commands (not currently available):
+macOS and Linux:
 
 ```bash
-curl -fsSL https://<project-domain>/install.sh | sh
-mcp-search install codex
+curl -fsSL https://raw.githubusercontent.com/suiflex/websift/main/install.sh | sh
 ```
 
-or one npm command (not currently available):
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/suiflex/websift/main/install.ps1 | iex
+```
+
+Both scripts detect the platform, download the matching release archive, **verify its SHA-256 before extracting**, and install into a per-user directory (`~/.local/bin`, or `%LOCALAPPDATA%\Programs\websift`). Neither needs sudo or administrator rights. Set `VERSION` / `WEBSIFT_VERSION` to pin a tag, and `INSTALL_DIR` / `WEBSIFT_INSTALL_DIR` to relocate the binary.
+
+Registration is one command per agent, printed by the installer:
 
 ```bash
-npx -y mcp-search install codex
+claude mcp add --scope user websift -- websift mcp --profile claude-code
+codex mcp add websift -- websift mcp --profile codex
 ```
 
-For the current source build, start the MCP server with:
+Nothing else has to be configured; `web_search` works immediately through the built-in backend.
+
+For a source checkout, start the MCP server with:
 
 ```bash
 cargo run -- mcp --profile codex
 ```
 
-`mcp-search install <client>` performs setup, registers the stdio MCP server globally for that client, verifies the handshake, and prints the installed tools. Re-running it is safe.
-
-The package name and installer domain shown above are provisional until they are reserved. Documentation must not present them as live before release.
+`websift install <client>` — a single command that performs setup, registers the client, and verifies the handshake — remains target behavior and is not shipped.
 
 ## 2. What gets installed
 
 ```text
-mcp-search executable
+websift executable
 ├── Rust core
 ├── bundled TypeScript worker
 ├── private Node runtime when installed natively
@@ -62,7 +70,7 @@ Full packaging behavior remains a target. The source CLI implements only the saf
 The target mode includes search integration when configured, static scraping, JavaScript rendering, mapping, and crawling. Setup would download a compatible Chromium build once and reuse it. Chromium rendering is not available in the current source build.
 
 ```bash
-mcp-search setup
+websift setup
 ```
 
 ### Lite mode — current effective source mode
@@ -70,7 +78,7 @@ mcp-search setup
 The current source build is effectively lite: it uses native HTTP and the worker extraction path, without Chromium. Search, static HTTP scraping, mapping, and bounded crawl operations remain available; JavaScript-only pages cannot be rendered.
 
 ```bash
-mcp-search setup --lite
+websift setup --lite
 ```
 
 Lite mode exists for servers, CI, minimal containers, and agents that only need documentation/static pages. It is not a separate product or codebase.
@@ -83,7 +91,7 @@ For operators who want SearXNG and all dependencies isolated:
 docker compose up -d
 ```
 
-The Compose profile includes MCP Search, managed Chromium, a persistent state volume, and optional SearXNG. Container mode is not required for ordinary local agent use.
+The Compose profile includes Websift, managed Chromium, a persistent state volume, and optional SearXNG. Container mode is not required for ordinary local agent use.
 
 ## 4. Supported installation channels
 
@@ -102,7 +110,7 @@ The installer:
 3. Verifies checksum and signed provenance before activation.
 4. Installs into a user-writable location by default; no `sudo` requirement.
 5. Includes the Rust executable, worker bundle, and private runtime needed by that worker.
-6. Runs `mcp-search doctor --quick`.
+6. Runs `websift doctor --quick`.
 
 It must support a pinned version and non-interactive CI use. It must not silently edit agent configuration unless a `--client` option is explicitly provided.
 
@@ -111,14 +119,14 @@ It must support a pinned version and non-interactive CI use. It must not silentl
 Target:
 
 ```bash
-npm install -g mcp-search
-mcp-search install codex
+npm install -g websift
+websift install codex
 ```
 
 or without a global installation:
 
 ```bash
-npx -y mcp-search install codex
+npx -y websift install codex
 ```
 
 The npm package is a thin launcher plus the TypeScript worker. Platform-specific optional packages carry prebuilt Rust executables; installation must not require Cargo, a C compiler, or `node-gyp`.
@@ -138,7 +146,7 @@ A pinned image and Compose file support Linux servers and reproducible self-host
 The stable process contract is:
 
 ```bash
-mcp-search mcp --profile <client>
+websift mcp --profile <client>
 ```
 
 It starts an MCP stdio server. stdout is protocol-only; setup progress and diagnostics go to stderr. The client installer sets a stable profile automatically; users do not manage it.
@@ -146,11 +154,11 @@ It starts an MCP stdio server. stdout is protocol-only; setup progress and diagn
 ### Unified installer
 
 ```bash
-mcp-search install codex
-mcp-search install claude-code
-mcp-search install hermes
-mcp-search install openclaw
-mcp-search install --detected
+websift install codex
+websift install claude-code
+websift install hermes
+websift install openclaw
+websift install --detected
 ```
 
 Rules:
@@ -159,7 +167,7 @@ Rules:
 - Prefer the client's supported CLI over direct configuration-file edits.
 - Default to user/global scope so the server is available across projects.
 - Show the exact planned change and request confirmation unless `--yes` is provided.
-- Remain idempotent: update the existing `mcp-search` entry instead of duplicating it.
+- Remain idempotent: update the existing `websift` entry instead of duplicating it.
 - Verify by starting MCP, listing tools, then stopping cleanly.
 - On failure, leave the previous client configuration intact.
 
@@ -168,7 +176,7 @@ Rules:
 The installer uses the supported equivalent of:
 
 ```bash
-codex mcp add mcp-search -- mcp-search mcp --profile codex
+codex mcp add websift -- websift mcp --profile codex
 ```
 
 ### Claude Code
@@ -176,7 +184,7 @@ codex mcp add mcp-search -- mcp-search mcp --profile codex
 The installer uses user scope:
 
 ```bash
-claude mcp add --scope user mcp-search -- mcp-search mcp --profile claude-code
+claude mcp add --scope user websift -- websift mcp --profile claude-code
 ```
 
 ### Hermes Agent
@@ -184,7 +192,7 @@ claude mcp add --scope user mcp-search -- mcp-search mcp --profile claude-code
 The installer uses its MCP manager:
 
 ```bash
-hermes mcp add mcp-search --command mcp-search --args mcp --profile hermes
+hermes mcp add websift --command websift --args mcp --profile hermes
 ```
 
 ### OpenClaw
@@ -194,9 +202,9 @@ The preferred integration is a thin OpenClaw plugin whose manifest contributes a
 ```json
 {
   "mcpServers": {
-    "mcp-search": {
+    "websift": {
       "transport": "stdio",
-      "command": "mcp-search",
+      "command": "websift",
       "args": ["mcp", "--profile", "openclaw"]
     }
   }
@@ -212,8 +220,8 @@ For any other harness:
 ```json
 {
   "mcpServers": {
-    "mcp-search": {
-      "command": "mcp-search",
+    "websift": {
+      "command": "websift",
       "args": ["mcp", "--profile", "default"]
     }
   }
@@ -222,7 +230,7 @@ For any other harness:
 
 ## 6. First-run behavior
 
-`mcp-search install <client>` runs setup before registering the MCP process. This prevents a client startup timeout while Chromium is downloading.
+`websift install <client>` runs setup before registering the MCP process. This prevents a client startup timeout while Chromium is downloading.
 
 Setup sequence:
 
@@ -256,32 +264,32 @@ A self-hosted SearXNG instance is an optional privacy upgrade for users who want
 
 ```bash
 # Existing trusted SearXNG (target CLI; not yet shipped)
-mcp-search config set searxng.url https://search.example.com
+websift config set searxng.url https://search.example.com
 
 # Local SearXNG through Docker when available (target CLI; not yet shipped)
-mcp-search setup --searxng
+websift setup --searxng
 ```
 
-Until those commands ship, the same effect is available by setting `MCP_SEARCH_SEARXNG_URL` in the MCP client's `env` block. The instance must have `json` enabled under `search.formats` in its `settings.yml`; the default SearXNG configuration serves HTML only.
+Until those commands ship, the same effect is available by setting `WEBSIFT_SEARXNG_URL` in the MCP client's `env` block. The instance must have `json` enabled under `search.formats` in its `settings.yml`; the default SearXNG configuration serves HTML only.
 
 The project must not silently rotate through public SearXNG instances. A probe of ten popular public instances on 2026-08-11 found zero that answered `format=json`: most returned `429`, `403`, or HTML. Public instances may disable JSON, rate-limit automated use, disappear, or prohibit the workload.
 
 Backend selection is automatic and reported, never guessed by the caller:
 
-- `mcp-search status` shows `search_backend` as `duckduckgo` or `searxng`.
+- `websift status` shows `search_backend` as `duckduckgo` or `searxng`.
 - `web_search` results carry the serving backend in `source` and `meta.provider`.
-- `mcp-search doctor` notes that the built-in backend is in use and how to switch to SearXNG.
+- `websift doctor` notes that the built-in backend is in use and how to switch to SearXNG.
 
 ## 9. State, cache, and cleanup
 
 Normal users never manage the state file directly.
 
 ```bash
-mcp-search status        # installation, browser, state size, search backend
-mcp-search doctor        # actionable health checks
-mcp-search cache clean   # remove expired cache only
-mcp-search uninstall     # remove client registrations; show package removal command
-mcp-search purge         # remove state/browser/cache after explicit confirmation
+websift status        # installation, browser, state size, search backend
+websift doctor        # actionable health checks
+websift cache clean   # remove expired cache only
+websift uninstall     # remove client registrations; show package removal command
+websift purge         # remove state/browser/cache after explicit confirmation
 ```
 
 Requirements:
@@ -296,10 +304,10 @@ Requirements:
 ## 10. Updates and compatibility
 
 - No background self-update in v1.
-- `mcp-search update` checks, downloads, verifies, and atomically switches versions.
-- `mcp-search update --check` performs no mutation.
+- `websift update` checks, downloads, verifies, and atomically switches versions.
+- `websift update --check` performs no mutation.
 - The executable and worker are always upgraded as one release unit.
-- Chromium compatibility is tied to that release and repaired by `mcp-search setup`.
+- Chromium compatibility is tied to that release and repaired by `websift setup`.
 - Rollback retains a compatible state backup when a migration changed storage.
 - MCP tool schemas follow the compatibility policy in `SPEC.md`.
 

@@ -1,5 +1,5 @@
 {
-  "name": "@mcp-search/browser-worker",
+  "name": "@websift/browser-worker",
   "version": "0.0.0",
   "private": true,
   "type": "module",

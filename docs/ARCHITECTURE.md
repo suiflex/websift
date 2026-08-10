@@ -1,4 +1,4 @@
-# MCP Search — Architecture
+# Websift — Architecture
 
 Status: **approved target architecture; partial implementation**  
 Last updated: 2026-08-10  
@@ -8,7 +8,7 @@ Related: [Product and technical specification](SPEC.md) · [Installation and dis
 
 ## 1. Decision summary
 
-MCP Search uses two languages inside one product:
+Websift uses two languages inside one product:
 
 - **Rust core:** MCP and CLI adapters, configuration, search client, URL/network policy, native HTTP fetching, crawl orchestration, SQLite state, cache policy, pagination, observability, and worker supervision.
 - **TypeScript content worker (target):** Playwright/Chromium rendering, DOM readiness, main-content extraction, HTML-to-Markdown conversion, screenshots, and browser artifact creation. The current worker supports the extraction protocol path but does not yet provide Playwright rendering or the full artifact set.
@@ -256,7 +256,7 @@ It does not:
 - stdout is protocol-only; worker diagnostics use stderr.
 - Maximum control-frame size is fixed and validated on both sides.
 - HTML, screenshots, and other large data never travel inline.
-- Rust creates a request spool directory with restrictive permissions and passes its opaque identifier during the request. Its root and the worker command are internal variables (`MCP_SEARCH_SPOOL_ROOT`, `MCP_SEARCH_WORKER_PROGRAM`, `MCP_SEARCH_WORKER_ARGS`) used by development and packaging, not part of the user-facing configuration contract.
+- Rust creates a request spool directory with restrictive permissions and passes its opaque identifier during the request. Its root and the worker command are internal variables (`WEBSIFT_SPOOL_ROOT`, `WEBSIFT_WORKER_PROGRAM`, `WEBSIFT_WORKER_ARGS`) used by development and packaging, not part of the user-facing configuration contract.
 - Worker manifests contain relative paths only. Rust rejects absolute paths, traversal, symlinks, unknown files, size mismatches, and hash mismatches.
 
 ### 5.2 Handshake
@@ -460,7 +460,7 @@ This mode optimizes iteration speed. Network isolation is best effort and must b
 
 ### Primary end-user installation
 
-The primary product is a prebuilt `mcp-search` command installed through npm or a verified native installer. The package contains or retrieves the matching Rust executable and content worker; users do not compile either language. Browser setup and MCP client registration are owned by `mcp-search setup` and `mcp-search install <client>`.
+The primary product is a prebuilt `websift` command installed through npm or a verified native installer. The package contains or retrieves the matching Rust executable and content worker; users do not compile either language. Browser setup and MCP client registration are owned by `websift setup` and `websift install <client>`.
 
 SQLite state is created lazily in the platform data directory. Chromium is installed into a managed cache only for full mode. See `INSTALLATION.md` for the user-facing contract.
 

@@ -4,7 +4,7 @@ import { join, resolve, relative, isAbsolute } from "node:path";
 import { createInterface } from "node:readline";
 import { errorMessage, helloMessage, parseInputFrame } from "./protocol.ts";
 
-const root = resolve(process.env.MCP_SEARCH_SPOOL_ROOT || process.cwd());
+const root = resolve(process.env.WEBSIFT_SPOOL_ROOT || process.cwd());
 const active = new Map();
 const output = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 

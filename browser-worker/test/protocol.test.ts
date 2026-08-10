@@ -13,7 +13,7 @@ test("parses extract and cancellation frames", () => { assert.equal(parseInputFr
 test("rejects malformed frames and unsupported formats", () => { assert.throws(() => parseInputFrame("{"), /malformed_json/); assert.throws(() => parseInputFrame(JSON.stringify({ type: "request", protocol_version: 2 })), /invalid_frame/); assert.throws(() => parseInputFrame(JSON.stringify(request({ spool_id: "../escape" }))), /invalid_request/); assert.throws(() => parseInputFrame(JSON.stringify(request({ options: { ...request().options, formats: ["links"] } }))), /invalid_request/); });
 
 test("markdown extraction removes embedded content and normalizes whitespace", () => {
-  const spoolRoot = mkdtempSync(join(tmpdir(), "mcp-search-worker-"));
+  const spoolRoot = mkdtempSync(join(tmpdir(), "websift-worker-"));
   const spool = join(spoolRoot, "spool_1");
   mkdirSync(spool);
   writeFileSync(join(spool, "input.html"), "<html>\n<script>bad()</script><style>.bad {}</style><main>  Hello\n\t world </main>\n</html>");
@@ -21,7 +21,7 @@ test("markdown extraction removes embedded content and normalizes whitespace", (
     cwd: new URL("..", import.meta.url).pathname,
     input: `${JSON.stringify(request())}\n`,
     encoding: "utf8",
-    env: { ...process.env, MCP_SEARCH_SPOOL_ROOT: realpathSync(spoolRoot) },
+    env: { ...process.env, WEBSIFT_SPOOL_ROOT: realpathSync(spoolRoot) },
   });
   assert.equal(result.status, 0, result.stderr);
   const frames = result.stdout.trim().split("\n").map((line) => JSON.parse(line));

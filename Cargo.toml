@@ -1,12 +1,12 @@
 [package]
-name = "mcp-search"
-version = "0.0.0"
+name = "websift"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
 publish = false
 
 [lib]
-name = "mcp_search"
+name = "websift"
 
 [dependencies]
 futures-util = "0.3.31"

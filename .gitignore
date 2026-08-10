@@ -5,4 +5,11 @@ browser-worker/dist/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
-.mcp-search/
+.websift/
+
+# Local agent and tooling state
+.agents/
+.claude/
+.codex/
+.forgeguard/
+.impeccable/

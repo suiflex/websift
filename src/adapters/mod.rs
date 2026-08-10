@@ -288,10 +288,10 @@ impl McpServer {
                 crawl_concurrency: 4,
                 per_host_concurrency: 2,
                 browser: crate::config::BrowserMode::Auto,
-                spool_root: std::path::PathBuf::from("/tmp/mcp-search-spool"),
+                spool_root: std::path::PathBuf::from("/tmp/websift-spool"),
                 worker_program: std::path::PathBuf::from("node"),
                 worker_args: Vec::new(),
-                data_dir: std::path::PathBuf::from("/tmp/mcp-search"),
+                data_dir: std::path::PathBuf::from("/tmp/websift"),
             },
             status,
             Store::open_in_memory().map_err(|_| "storage initialization failed")?,
@@ -309,8 +309,8 @@ impl McpServer {
 impl McpServer {
     /// Report installed capabilities without making network requests.
     #[tool(
-        name = "mcp_search_status",
-        description = "Report the running MCP Search version and profile"
+        name = "websift_status",
+        description = "Report the running Websift version and profile"
     )]
     fn status(&self, Parameters(_params): Parameters<StatusParams>) -> Json<RuntimeStatus> {
         Json(self.status.clone())
@@ -854,10 +854,10 @@ mod tests {
             crawl_concurrency: 8,
             per_host_concurrency: 3,
             browser: crate::config::BrowserMode::Disabled,
-            spool_root: std::path::PathBuf::from("/tmp/mcp-search-spool"),
+            spool_root: std::path::PathBuf::from("/tmp/websift-spool"),
             worker_program: std::path::PathBuf::from("node"),
             worker_args: Vec::new(),
-            data_dir: std::path::PathBuf::from("/tmp/mcp-search"),
+            data_dir: std::path::PathBuf::from("/tmp/websift"),
         }
     }
 
@@ -891,7 +891,7 @@ mod tests {
 
     #[test]
     fn from_config_creates_profile_scoped_database() {
-        let data_dir = std::env::temp_dir().join(format!("mcp-search-test-{}", std::process::id()));
+        let data_dir = std::env::temp_dir().join(format!("websift-test-{}", std::process::id()));
         let mut config = test_config();
         config.data_dir = data_dir.clone();
         let server = McpServer::from_config(config).unwrap();
@@ -938,7 +938,7 @@ mod tests {
                 Some(&serde_json::Value::Bool(false))
             );
         }
-        assert!(tools.iter().any(|tool| tool.name == "mcp_search_status"));
+        assert!(tools.iter().any(|tool| tool.name == "websift_status"));
         assert!(tools.iter().any(|tool| tool.name == "web_search"));
         assert!(tools.iter().any(|tool| tool.name == "web_scrape"));
         for tool in tools.iter().filter(|tool| tool.name == "web_search") {
@@ -957,7 +957,7 @@ mod tests {
         client: &rmcp::service::RunningService<rmcp::RoleClient, ClientInfo>,
     ) {
         let result = client
-            .call_tool(CallToolRequestParams::new("mcp_search_status"))
+            .call_tool(CallToolRequestParams::new("websift_status"))
             .await
             .expect("tools/call succeeds");
         let status = result.structured_content.expect("structured status");
@@ -968,7 +968,7 @@ mod tests {
         unknown_arguments.insert("unexpected".to_owned(), serde_json::Value::Bool(true));
         let rejected = client
             .call_tool(
-                CallToolRequestParams::new("mcp_search_status").with_arguments(unknown_arguments),
+                CallToolRequestParams::new("websift_status").with_arguments(unknown_arguments),
             )
             .await
             .expect("invalid tool arguments produce a tool result");
@@ -997,7 +997,7 @@ mod tests {
         let tools = client.list_all_tools().await.expect("tools/list succeeds");
         let server_info = client.peer_info().expect("server metadata");
         let implementation = server_info.server_info.as_ref().expect("server identity");
-        assert_eq!(implementation.name, "mcp-search");
+        assert_eq!(implementation.name, "websift");
         assert_eq!(implementation.version, env!("CARGO_PKG_VERSION"));
         assert_eq!(tools.len(), 8);
         assert_tool_schemas(&tools);

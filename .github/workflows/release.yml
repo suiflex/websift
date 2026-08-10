@@ -21,6 +21,10 @@ jobs:
             runner: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+          - target: aarch64-pc-windows-msvc
+            runner: windows-11-arm
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -30,10 +34,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Package
+        shell: bash
         run: |
           set -eu
-          asset="mcp-search-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.gz"
-          tar -czf "$asset" -C "target/${{ matrix.target }}/release" mcp-search
+          release_dir="target/${{ matrix.target }}/release"
+          # The binary must sit at the archive root: both installers extract it flat.
+          case "${{ matrix.target }}" in
+            *windows*)
+              asset="websift-${GITHUB_REF_NAME}-${{ matrix.target }}.zip"
+              (cd "$release_dir" && 7z a "$OLDPWD/$asset" websift.exe > /dev/null)
+              ;;
+            *)
+              asset="websift-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.gz"
+              tar -czf "$asset" -C "$release_dir" websift
+              ;;
+          esac
           if command -v sha256sum >/dev/null 2>&1; then
             sha256sum "$asset" > "$asset.sha256"
           else
@@ -43,8 +58,10 @@ jobs:
         with:
           name: ${{ matrix.target }}
           path: |
-            *.tar.gz
-            *.tar.gz.sha256
+            websift-*.tar.gz
+            websift-*.zip
+            websift-*.sha256
+          if-no-files-found: error
 
   publish:
     needs: build
@@ -56,5 +73,6 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: |
-            *.tar.gz
-            *.tar.gz.sha256
+            websift-*.tar.gz
+            websift-*.zip
+            websift-*.sha256

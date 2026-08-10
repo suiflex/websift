@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install the mcp-search binary from a published GitHub release.
+# Install the websift binary from a published GitHub release.
 #
 #   curl -fsSL https://raw.githubusercontent.com/suiflex/websift/main/install.sh | sh
 #
@@ -9,7 +9,7 @@
 set -eu
 
 REPO="suiflex/websift"
-BIN="mcp-search"
+BIN="websift"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
 fail() {
@@ -90,8 +90,8 @@ cat <<EOF
 
 Register the server with an agent (nothing else to configure; search works out of the box):
 
-  claude mcp add --scope user mcp-search -- ${INSTALL_DIR}/${BIN} mcp --profile claude-code
-  codex mcp add mcp-search -- ${INSTALL_DIR}/${BIN} mcp --profile codex
+  claude mcp add --scope user websift -- ${INSTALL_DIR}/${BIN} mcp --profile claude-code
+  codex mcp add websift -- ${INSTALL_DIR}/${BIN} mcp --profile codex
 
 Check the installation:
 

@@ -574,12 +574,9 @@ mod tests {
             "User-agent: *\nDisallow: /private\nAllow: /private/public$\nCrawl-delay: 2\n",
             1024,
         );
-        assert!(!rules.allowed("/private/x", "mcp-search"));
-        assert!(rules.allowed("/private/public", "mcp-search"));
-        assert_eq!(
-            rules.crawl_delay("mcp-search"),
-            Some(Duration::from_secs(2))
-        );
+        assert!(!rules.allowed("/private/x", "websift"));
+        assert!(rules.allowed("/private/public", "websift"));
+        assert_eq!(rules.crawl_delay("websift"), Some(Duration::from_secs(2)));
         let mut cache = RobotsCache::new(Duration::from_secs(60), 1);
         cache.insert("https://example.com", rules);
         assert!(cache.get("https://example.com").is_some());

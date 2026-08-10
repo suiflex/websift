@@ -243,8 +243,8 @@ impl WorkerSupervisor {
         args: &[String],
         request_timeout: Duration,
     ) -> Result<Self, WorkerError> {
-        let spool_root = std::env::var_os("MCP_SEARCH_SPOOL_ROOT")
-            .map_or_else(|| PathBuf::from("/tmp/mcp-search-spool"), PathBuf::from);
+        let spool_root = std::env::var_os("WEBSIFT_SPOOL_ROOT")
+            .map_or_else(|| PathBuf::from("/tmp/websift-spool"), PathBuf::from);
         Self::spawn_with_spool_root(program, args, request_timeout, spool_root).await
     }
 
@@ -263,7 +263,7 @@ impl WorkerSupervisor {
         command.kill_on_drop(true);
         command
             .args(args)
-            .env("MCP_SEARCH_SPOOL_ROOT", &spool_root)
+            .env("WEBSIFT_SPOOL_ROOT", &spool_root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());

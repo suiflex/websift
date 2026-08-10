@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://mcp-search.dev/schemas/worker-v1.schema.json",
-  "title": "MCP Search worker protocol v1",
+  "$id": "https://websift.dev/schemas/worker-v1.schema.json",
+  "title": "Websift worker protocol v1",
   "oneOf": [
     { "$ref": "#/$defs/hello" },
     { "$ref": "#/$defs/request" },

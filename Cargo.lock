@@ -813,25 +813,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mcp-search"
-version = "0.0.0"
-dependencies = [
- "chrono",
- "futures-util",
- "reqwest",
- "rmcp",
- "rusqlite",
- "schemars",
- "scraper",
- "serde",
- "serde_json",
- "sha2",
- "thiserror",
- "tokio",
- "url",
-]
-
-[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1952,6 +1933,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
 dependencies = [
  "rustls-pki-types",
+]
+
+[[package]]
+name = "websift"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "futures-util",
+ "reqwest",
+ "rmcp",
+ "rusqlite",
+ "schemars",
+ "scraper",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "tokio",
+ "url",
 ]
 
 [[package]]

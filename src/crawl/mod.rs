@@ -20,7 +20,7 @@ use crate::{
     storage::{StorageError, Store},
 };
 
-const ROBOTS_USER_AGENT: &str = "mcp-search";
+const ROBOTS_USER_AGENT: &str = "websift";
 const ROBOTS_MAX_BYTES: usize = 512 * 1024;
 const ROBOTS_CACHE_TTL: Duration = Duration::from_secs(300);
 const ROBOTS_CACHE_ENTRIES: usize = 256;
@@ -656,9 +656,7 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let fetch = FetchClient::new(Duration::from_secs(1), 1024).unwrap();
         let robots_fetcher: RobotsFetcher = std::sync::Arc::new(|_| {
-            Box::pin(async {
-                Ok("User-agent: mcp-search\nDisallow: /private\nAllow: /".to_owned())
-            })
+            Box::pin(async { Ok("User-agent: websift\nDisallow: /private\nAllow: /".to_owned()) })
         });
         let service = CrawlService::with_robots_fetcher(&store, fetch, "test", robots_fetcher);
         let rules = service.robots_for("https://example.com").await.unwrap();

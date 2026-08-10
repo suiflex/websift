@@ -9,9 +9,9 @@ const DEFAULT_TIMEOUT_MS: u64 = 10_000;
 const DEFAULT_MAX_RESULTS: u32 = 10;
 const DEFAULT_MAX_BYTES: u64 = 2_000_000;
 const DEFAULT_CRAWL_CONCURRENCY: u16 = 4;
-const DEFAULT_SPOOL_ROOT: &str = "/tmp/mcp-search-spool";
+const DEFAULT_SPOOL_ROOT: &str = "/tmp/websift-spool";
 const DEFAULT_PER_HOST_CONCURRENCY: u16 = 2;
-const DATA_DIR_ENV: &str = "MCP_SEARCH_DATA_DIR";
+const DATA_DIR_ENV: &str = "WEBSIFT_DATA_DIR";
 
 /// Configuration selected when the process starts.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,59 +66,59 @@ impl Config {
     pub(crate) fn from_lookup(
         mut lookup: impl FnMut(&str) -> Option<String>,
     ) -> Result<Self, String> {
-        let profile = lookup("MCP_SEARCH_PROFILE").unwrap_or_else(|| "default".to_owned());
+        let profile = lookup("WEBSIFT_PROFILE").unwrap_or_else(|| "default".to_owned());
         let profile = crate::application::RuntimeStatus::new(&profile)
             .map_err(str::to_owned)?
             .profile;
-        let searxng_url = lookup("MCP_SEARCH_SEARXNG_URL")
+        let searxng_url = lookup("WEBSIFT_SEARXNG_URL")
             .map(|value| {
                 crate::policy::PublicUrl::parse(&value)
                     .map(|url| url.as_str().to_owned())
-                    .map_err(|error| format!("MCP_SEARCH_SEARXNG_URL is invalid: {error:?}"))
+                    .map_err(|error| format!("WEBSIFT_SEARXNG_URL is invalid: {error:?}"))
             })
             .transpose()?;
         let timeout_ms = parse_timeout_ms(&mut lookup)?;
         let max_results = parse_u32(
             &mut lookup,
-            "MCP_SEARCH_MAX_RESULTS",
+            "WEBSIFT_MAX_RESULTS",
             DEFAULT_MAX_RESULTS,
             1,
             50,
         )?;
         let max_bytes = parse_u64(
             &mut lookup,
-            "MCP_SEARCH_MAX_BYTES",
+            "WEBSIFT_MAX_BYTES",
             DEFAULT_MAX_BYTES,
             1,
             100_000_000,
         )?;
         let crawl_concurrency = parse_u16(
             &mut lookup,
-            "MCP_SEARCH_CRAWL_CONCURRENCY",
+            "WEBSIFT_CRAWL_CONCURRENCY",
             DEFAULT_CRAWL_CONCURRENCY,
             1,
             32,
         )?;
         let per_host_concurrency = parse_u16(
             &mut lookup,
-            "MCP_SEARCH_PER_HOST_CONCURRENCY",
+            "WEBSIFT_PER_HOST_CONCURRENCY",
             DEFAULT_PER_HOST_CONCURRENCY,
             1,
             32,
         )?;
-        let browser = match lookup("MCP_SEARCH_BROWSER").as_deref().unwrap_or("auto") {
+        let browser = match lookup("WEBSIFT_BROWSER").as_deref().unwrap_or("auto") {
             "auto" => BrowserMode::Auto,
             "enabled" => BrowserMode::Enabled,
             "disabled" => BrowserMode::Disabled,
-            value => return Err(format!("MCP_SEARCH_BROWSER has unsupported value: {value}")),
+            value => return Err(format!("WEBSIFT_BROWSER has unsupported value: {value}")),
         };
-        let spool_root = lookup("MCP_SEARCH_SPOOL_ROOT")
+        let spool_root = lookup("WEBSIFT_SPOOL_ROOT")
             .map_or_else(|| PathBuf::from(DEFAULT_SPOOL_ROOT), PathBuf::from);
-        validate_path("MCP_SEARCH_SPOOL_ROOT", &spool_root)?;
-        let worker_program = lookup("MCP_SEARCH_WORKER_PROGRAM")
-            .map_or_else(|| PathBuf::from("node"), PathBuf::from);
-        validate_path("MCP_SEARCH_WORKER_PROGRAM", &worker_program)?;
-        let worker_args = lookup("MCP_SEARCH_WORKER_ARGS").map_or_else(
+        validate_path("WEBSIFT_SPOOL_ROOT", &spool_root)?;
+        let worker_program =
+            lookup("WEBSIFT_WORKER_PROGRAM").map_or_else(|| PathBuf::from("node"), PathBuf::from);
+        validate_path("WEBSIFT_WORKER_PROGRAM", &worker_program)?;
+        let worker_args = lookup("WEBSIFT_WORKER_ARGS").map_or_else(
             || {
                 vec![
                     "--experimental-strip-types".to_owned(),
@@ -128,7 +128,7 @@ impl Config {
             |value| value.split('\u{1f}').map(str::to_owned).collect(),
         );
         if worker_args.len() > 16 || worker_args.iter().any(|arg| arg.len() > 1024) {
-            return Err("MCP_SEARCH_WORKER_ARGS is invalid".to_owned());
+            return Err("WEBSIFT_WORKER_ARGS is invalid".to_owned());
         }
         let data_dir = lookup(DATA_DIR_ENV).map_or_else(default_data_dir, PathBuf::from);
         validate_path(DATA_DIR_ENV, &data_dir)?;
@@ -153,13 +153,13 @@ impl Config {
 fn default_data_dir() -> PathBuf {
     if cfg!(target_os = "macos") {
         env::var_os("HOME").map_or_else(
-            || PathBuf::from("/tmp/mcp-search"),
-            |home| PathBuf::from(home).join("Library/Application Support/mcp-search"),
+            || PathBuf::from("/tmp/websift"),
+            |home| PathBuf::from(home).join("Library/Application Support/websift"),
         )
     } else if cfg!(target_os = "windows") {
         env::var_os("LOCALAPPDATA").map_or_else(
-            || PathBuf::from("mcp-search"),
-            |dir| PathBuf::from(dir).join("mcp-search"),
+            || PathBuf::from("websift"),
+            |dir| PathBuf::from(dir).join("websift"),
         )
     } else {
         env::var_os("XDG_DATA_HOME")
@@ -168,8 +168,8 @@ fn default_data_dir() -> PathBuf {
                     .map(|home| PathBuf::from(home).join(".local/share").into_os_string())
             })
             .map_or_else(
-                || PathBuf::from("/tmp/mcp-search"),
-                |dir| PathBuf::from(dir).join("mcp-search"),
+                || PathBuf::from("/tmp/websift"),
+                |dir| PathBuf::from(dir).join("websift"),
             )
     }
 }
@@ -182,10 +182,10 @@ fn validate_path(key: &str, path: &Path) -> Result<(), String> {
 }
 
 fn parse_timeout_ms(lookup: &mut impl FnMut(&str) -> Option<String>) -> Result<u64, String> {
-    let key = if lookup("MCP_SEARCH_TIMEOUT").is_some() {
-        "MCP_SEARCH_TIMEOUT"
+    let key = if lookup("WEBSIFT_TIMEOUT").is_some() {
+        "WEBSIFT_TIMEOUT"
     } else {
-        "MCP_SEARCH_TIMEOUT_MS"
+        "WEBSIFT_TIMEOUT_MS"
     };
     let Some(value) = lookup(key) else {
         return Ok(DEFAULT_TIMEOUT_MS);
@@ -286,15 +286,15 @@ mod tests {
 
     #[test]
     fn rejects_out_of_bounds_values() {
-        assert!(config(&[("MCP_SEARCH_MAX_RESULTS", "51")]).is_err());
-        assert!(config(&[("MCP_SEARCH_BROWSER", "maybe")]).is_err());
-        assert!(config(&[("MCP_SEARCH_SEARXNG_URL", "http://127.0.0.1")]).is_err());
+        assert!(config(&[("WEBSIFT_MAX_RESULTS", "51")]).is_err());
+        assert!(config(&[("WEBSIFT_BROWSER", "maybe")]).is_err());
+        assert!(config(&[("WEBSIFT_SEARXNG_URL", "http://127.0.0.1")]).is_err());
     }
 
     #[test]
     fn accepts_duration_timeout() {
         assert_eq!(
-            config(&[("MCP_SEARCH_TIMEOUT", "30s")]).unwrap().timeout_ms,
+            config(&[("WEBSIFT_TIMEOUT", "30s")]).unwrap().timeout_ms,
             30_000
         );
     }
@@ -302,19 +302,19 @@ mod tests {
     #[test]
     fn parses_explicit_data_directory_and_rejects_empty_path() {
         assert_eq!(
-            config(&[("MCP_SEARCH_DATA_DIR", "/var/lib/mcp-search")])
+            config(&[("WEBSIFT_DATA_DIR", "/var/lib/websift")])
                 .unwrap()
                 .data_dir,
-            PathBuf::from("/var/lib/mcp-search")
+            PathBuf::from("/var/lib/websift")
         );
-        assert!(config(&[("MCP_SEARCH_DATA_DIR", "")]).is_err());
+        assert!(config(&[("WEBSIFT_DATA_DIR", "")]).is_err());
     }
 
     #[test]
     fn cli_profile_overrides_environment_profile_only() {
         let config = Config::from_lookup(|key| match key {
-            "MCP_SEARCH_PROFILE" => Some("environment".to_owned()),
-            "MCP_SEARCH_MAX_RESULTS" => Some("25".to_owned()),
+            "WEBSIFT_PROFILE" => Some("environment".to_owned()),
+            "WEBSIFT_MAX_RESULTS" => Some("25".to_owned()),
             _ => None,
         })
         .unwrap();

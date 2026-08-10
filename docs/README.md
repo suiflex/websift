@@ -1,6 +1,6 @@
-# MCP Search documentation
+# Websift documentation
 
-MCP Search has a runnable retrieval and crawl foundation. The MCP stdio server exposes configuration/status, `web_search`, `web_scrape`, `web_map`, and crawl lifecycle tools, and requires no environment configuration to start. Native HTTP fetching/extraction, URL policy, robots checks, background crawl execution, worker extraction mode, and durable SQLite state are implemented. Browser rendering, full scheduler recovery/concurrency behavior, packaging/CLI, and complete worker integration remain gaps.
+Websift has a runnable retrieval and crawl foundation. The MCP stdio server exposes configuration/status, `web_search`, `web_scrape`, `web_map`, and crawl lifecycle tools, and requires no environment configuration to start. Native HTTP fetching/extraction, URL policy, robots checks, background crawl execution, worker extraction mode, and durable SQLite state are implemented. Browser rendering, full scheduler recovery/concurrency behavior, packaging/CLI, and complete worker integration remain gaps.
 
 ## Documents
 

@@ -1,4 +1,4 @@
-//! Core library for MCP Search.
+//! Core library for Websift.
 //!
 //! The MCP boundary is runnable; retrieval behavior remains intentionally absent.
 

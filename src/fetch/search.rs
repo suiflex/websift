@@ -79,7 +79,7 @@ const MAX_ADDRESSES: usize = 16;
 const MAX_REDIRECTS: usize = 5;
 const DUCKDUCKGO_ENDPOINT: &str = "https://lite.duckduckgo.com/lite/";
 /// Stable outbound identity. The crawler identifies itself instead of impersonating a browser.
-const CLIENT_USER_AGENT: &str = concat!("mcp-search/", env!("CARGO_PKG_VERSION"));
+const CLIENT_USER_AGENT: &str = concat!("websift/", env!("CARGO_PKG_VERSION"));
 
 #[allow(clippy::needless_pass_by_value)]
 fn search_transport_error(error: reqwest::Error) -> SearchError {
@@ -466,7 +466,7 @@ mod tests {
     #[test]
     fn configured_instance_replaces_the_builtin_backend() {
         let config = Config::from_lookup(|key| {
-            (key == "MCP_SEARCH_SEARXNG_URL").then(|| "https://search.example.com".to_owned())
+            (key == "WEBSIFT_SEARXNG_URL").then(|| "https://search.example.com".to_owned())
         })
         .unwrap();
         let client = SearchClient::from_config(&config).unwrap();

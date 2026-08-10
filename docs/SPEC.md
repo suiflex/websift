@@ -1,4 +1,4 @@
-# MCP Search — Product and Technical Specification
+# Websift — Product and Technical Specification
 
 Status: **product contract and target roadmap; partial implementation**  
 Last updated: 2026-08-10
@@ -7,7 +7,7 @@ Last updated: 2026-08-10
 
 ## 1. Product definition
 
-MCP Search is a self-hostable, open-source web retrieval and crawling layer for AI agents. It gives agent harnesses a consistent way to search, scrape, map, and crawl the public web without requiring a paid search provider.
+Websift is a self-hostable, open-source web retrieval and crawling layer for AI agents. It gives agent harnesses a consistent way to search, scrape, map, and crawl the public web without requiring a paid search provider.
 
 The product is not a new internet-scale search index. It sits between an agent and existing retrieval sources, beginning with a user-supplied SearXNG instance, and returns bounded, attributable data that the calling agent can reason over.
 
@@ -103,21 +103,21 @@ Configuration is environment-first so the same binary works under MCP launchers 
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `MCP_SEARCH_SEARXNG_URL` | none | Base URL of a trusted SearXNG instance. When set it replaces the built-in backend; when unset search still works |
-| `MCP_SEARCH_TIMEOUT` | `10s` | Total timeout per outbound request |
-| `MCP_SEARCH_MAX_RESULTS` | `10` | Maximum search results; hard ceiling `50` |
-| `MCP_SEARCH_MAX_BYTES` | `2000000` | Maximum compressed or decoded response bytes, whichever limit is reached first |
-| `MCP_SEARCH_CRAWL_CONCURRENCY` | `4` | Global page-worker limit; hard ceiling `32` |
-| `MCP_SEARCH_PER_HOST_CONCURRENCY` | `2` | Per-host request limit |
-| `MCP_SEARCH_BROWSER` | `auto` | `auto`, `enabled`, or `disabled` browser-worker policy |
-| `MCP_SEARCH_DATA_DIR` | platform data directory | Advanced override for automatically managed state and artifacts |
-| `MCP_SEARCH_PROFILE` | `default` | Local visibility namespace; client installers set `codex`, `claude-code`, `hermes`, or `openclaw` |
+| `WEBSIFT_SEARXNG_URL` | none | Base URL of a trusted SearXNG instance. When set it replaces the built-in backend; when unset search still works |
+| `WEBSIFT_TIMEOUT` | `10s` | Total timeout per outbound request |
+| `WEBSIFT_MAX_RESULTS` | `10` | Maximum search results; hard ceiling `50` |
+| `WEBSIFT_MAX_BYTES` | `2000000` | Maximum compressed or decoded response bytes, whichever limit is reached first |
+| `WEBSIFT_CRAWL_CONCURRENCY` | `4` | Global page-worker limit; hard ceiling `32` |
+| `WEBSIFT_PER_HOST_CONCURRENCY` | `2` | Per-host request limit |
+| `WEBSIFT_BROWSER` | `auto` | `auto`, `enabled`, or `disabled` browser-worker policy |
+| `WEBSIFT_DATA_DIR` | platform data directory | Advanced override for automatically managed state and artifacts |
+| `WEBSIFT_PROFILE` | `default` | Local visibility namespace; client installers set `codex`, `claude-code`, `hermes`, or `openclaw` |
 
 ### Internal variables
 
-These exist for development, testing, and packaging. They are not part of the user-facing contract and may change without notice: `MCP_SEARCH_TIMEOUT_MS` (numeric alias for `MCP_SEARCH_TIMEOUT`), `MCP_SEARCH_SPOOL_ROOT`, `MCP_SEARCH_WORKER_PROGRAM`, and `MCP_SEARCH_WORKER_ARGS`.
+These exist for development, testing, and packaging. They are not part of the user-facing contract and may change without notice: `WEBSIFT_TIMEOUT_MS` (numeric alias for `WEBSIFT_TIMEOUT`), `WEBSIFT_SPOOL_ROOT`, `WEBSIFT_WORKER_PROGRAM`, and `WEBSIFT_WORKER_ARGS`.
 
-The outbound user agent is a fixed `mcp-search/<version>` identifier rather than a configurable value, so the client stays identifiable in robots rules and server logs and cannot be pointed at browser impersonation.
+The outbound user agent is a fixed `websift/<version>` identifier rather than a configurable value, so the client stays identifiable in robots rules and server logs and cannot be pointed at browser impersonation.
 
 Secrets must not appear in tool results or logs. Paid-provider keys are intentionally absent from v1.
 
@@ -125,7 +125,7 @@ Secrets must not appear in tool results or logs. Paid-provider keys are intentio
 
 All tool output uses JSON-compatible objects. Unknown input fields are rejected. Strings are trimmed; empty queries and URLs are rejected.
 
-### `mcp_search_status`
+### `websift_status`
 
 Takes no meaningful input and performs no network request. It returns the running `version` and the active `profile` so a caller can confirm which installation and namespace it is talking to.
 

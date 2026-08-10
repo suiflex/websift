@@ -1,14 +1,14 @@
 use std::{error::Error, process::ExitCode};
 
-use mcp_search::{
+use rmcp::{ServiceExt, transport::stdio};
+use serde::Serialize;
+use websift::{
     adapters::McpServer,
     application::RuntimeStatus,
     config::{BrowserMode, Config},
 };
-use rmcp::{ServiceExt, transport::stdio};
-use serde::Serialize;
 
-const USAGE: &str = "usage: mcp-search <mcp|status|setup|doctor> [options]";
+const USAGE: &str = "usage: websift <mcp|status|setup|doctor> [options]";
 
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
@@ -47,7 +47,7 @@ async fn main() -> ExitCode {
     match run().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("mcp-search: {error}");
+            eprintln!("websift: {error}");
             ExitCode::FAILURE
         }
     }
@@ -167,7 +167,7 @@ fn print_doctor(config: Config) -> Result<(), Box<dyn Error>> {
     };
     let mut notes = Vec::new();
     if config.searxng_url.is_none() {
-        notes.push("web_search uses the built-in backend; set MCP_SEARCH_SEARXNG_URL to use a private SearXNG instance");
+        notes.push("web_search uses the built-in backend; set WEBSIFT_SEARXNG_URL to use a private SearXNG instance");
     }
     notes.push("Chromium installers and package distribution are not shipped");
     let report = DoctorReport {
