@@ -13,6 +13,8 @@ Environment overrides:
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+# Progress messages must reach the user through an 'irm | iex' pipe without polluting output.
+$InformationPreference = 'Continue'
 
 $repo = 'suiflex/websift'
 $installDir = if ($env:WEBSIFT_INSTALL_DIR) {
@@ -41,7 +43,7 @@ $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomF
 New-Item -ItemType Directory -Path $tmp | Out-Null
 
 try {
-    Write-Host "install: downloading $asset"
+    Write-Information "install: downloading $asset"
     try {
         Invoke-WebRequest -Uri "$base/$asset" -OutFile (Join-Path $tmp $asset)
         Invoke-WebRequest -Uri "$base/$asset.sha256" -OutFile (Join-Path $tmp "$asset.sha256")
@@ -65,15 +67,15 @@ try {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
 
-Write-Host "install: websift $version installed to $installDir\websift.exe"
+Write-Information "install: websift $version installed to $installDir\websift.exe"
 
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 if ($userPath -notlike "*$installDir*") {
     [Environment]::SetEnvironmentVariable('Path', "$userPath;$installDir", 'User')
-    Write-Host "install: added $installDir to your user PATH; reopen your terminal"
+    Write-Information "install: added $installDir to your user PATH; reopen your terminal"
 }
 
-Write-Host @"
+Write-Information @"
 
 Register the server with an agent (nothing else to configure; search works out of the box):
 
