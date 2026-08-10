@@ -13,8 +13,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Cross-compiled from the Apple Silicon runner: the Intel macOS runner is retired.
           - target: x86_64-apple-darwin
-            runner: macos-13
+            runner: macos-latest
           - target: aarch64-apple-darwin
             runner: macos-latest
           - target: x86_64-unknown-linux-gnu
