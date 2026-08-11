@@ -413,7 +413,8 @@ mod tests {
 
     #[test]
     fn replaces_the_target_file_in_place() {
-        let directory = std::env::temp_dir().join(format!("websift-test-{}", std::process::id()));
+        let directory =
+            std::env::temp_dir().join(format!("websift-update-replace-{}", std::process::id()));
         std::fs::create_dir_all(&directory).unwrap();
         let destination = directory.join("websift");
         std::fs::write(&destination, b"old").unwrap();
@@ -434,7 +435,7 @@ mod tests {
     #[test]
     fn leaves_no_staging_file_when_the_replacement_fails() {
         let directory =
-            std::env::temp_dir().join(format!("websift-test-fail-{}", std::process::id()));
+            std::env::temp_dir().join(format!("websift-update-refuse-{}", std::process::id()));
         std::fs::create_dir_all(&directory).unwrap();
         // A directory at the destination is refused on every platform, standing in for any
         // failure after staging. Renaming onto a directory fails on Unix anyway, but Windows

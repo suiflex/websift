@@ -1261,7 +1261,10 @@ mod tests {
 
     #[test]
     fn from_config_creates_profile_scoped_database() {
-        let data_dir = std::env::temp_dir().join(format!("websift-test-{}", std::process::id()));
+        // Tests share one process, so a directory name must identify the test, not just the
+        // process; two tests deriving the same name deleted each other's files.
+        let data_dir =
+            std::env::temp_dir().join(format!("websift-adapter-store-{}", std::process::id()));
         let mut config = test_config();
         config.data_dir = data_dir.clone();
         let server = McpServer::from_config(config).unwrap();
