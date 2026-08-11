@@ -22,6 +22,24 @@ jobs:
       - run: cargo test
       - run: cargo clippy --all-targets -- -D warnings
 
+  # Windows and macOS are shipped targets, so their platform-specific code must be compiled and
+  # tested on every change rather than first on a release tag.
+  rust-platforms:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --all-targets
+      - run: cargo test
+      - run: cargo clippy --all-targets -- -D warnings
+
   worker:
     runs-on: ubuntu-latest
     steps:

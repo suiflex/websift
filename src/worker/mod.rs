@@ -21,6 +21,10 @@ use tokio::{
     time::timeout,
 };
 
+/// `CREATE_NO_WINDOW`: start a console child without allocating a console window.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 const PROTOCOL_VERSION: u8 = 1;
 const MAX_FRAME_BYTES: usize = 1_048_576;
 const MAX_ARTIFACTS: usize = 7;
@@ -267,6 +271,14 @@ impl WorkerSupervisor {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            // The worker is a console program. An MCP host is usually a GUI process with no
+            // console to inherit, so Windows would open a visible console window for the worker
+            // and steal focus from whatever the user is doing. Every stream is piped here, so the
+            // window would carry no output anyway.
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
         let mut child = command.spawn().map_err(WorkerError::Spawn)?;
         let stdin = child
             .stdin
