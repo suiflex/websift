@@ -272,6 +272,14 @@ mod tests {
                 lite: true
             })
         );
+        assert_eq!(
+            parse_command(["update".into()]),
+            Ok(Command::Update { check_only: false })
+        );
+        assert_eq!(
+            parse_command(["update".into(), "--check".into()]),
+            Ok(Command::Update { check_only: true })
+        );
     }
 
     #[test]
@@ -288,5 +296,8 @@ mod tests {
         );
         assert!(parse_command(["mcp".into(), "--profile".into()]).is_err());
         assert!(parse_command(["status".into(), "--lite".into()]).is_err());
+        // An unknown update flag must not silently fall through to a mutating update.
+        assert!(parse_command(["update".into(), "--force".into()]).is_err());
+        assert!(parse_command(["update".into(), "--check".into(), "extra".into()]).is_err());
     }
 }

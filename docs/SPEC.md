@@ -1,9 +1,9 @@
 # Websift — Product and Technical Specification
 
 Status: **product contract and target roadmap; partial implementation**  
-Last updated: 2026-08-10
+Last updated: 2026-08-11
 
-> **Current implementation snapshot.** Configuration/profile handling, public URL policy primitives, bounded native HTTP retrieval, HTML/plain-text extraction, zero-configuration search through the built-in backend with optional SearXNG, static mapping, crawl lifecycle/background execution with robots checks, worker extraction mode, and durable SQLite state are implemented. Playwright/Chromium rendering, full scheduler leases/concurrency/retries/resume, packaging/management CLI, and complete worker artifact integration remain gaps. The current worker advertises extraction only; rendering and screenshot formats are not worker capabilities. This specification intentionally retains target behavior for those gaps.
+> **Current implementation snapshot.** Configuration/profile handling, public URL policy primitives, bounded native HTTP retrieval, HTML/plain-text extraction, zero-configuration search through the built-in backend with optional SearXNG, static mapping, crawl lifecycle/background execution with robots checks, worker extraction mode, durable SQLite state, released binaries with platform installers, and checksum-verified `websift update` are implemented. Playwright/Chromium rendering, full scheduler leases/concurrency/retries/resume, the remaining management CLI, and complete worker artifact integration remain gaps. The current worker advertises extraction only; rendering and screenshot formats are not worker capabilities. This specification intentionally retains target behavior for those gaps.
 
 ## 1. Product definition
 
@@ -372,7 +372,8 @@ The crawler supports outbound proxy configuration for legitimate deployment/netw
 | Full leases, global/per-host concurrency, retries, resume | required | gap |
 | Clean/raw HTML, links, images, metadata, screenshot artifacts | required | gap: worker integration is Markdown-limited |
 | Incremental recrawl and content change detection | required | gap |
-| Packaging, installers, and management CLI | required | gap |
+| Release binaries, platform installers, and checksum-verified self-update | required | implemented |
+| Remaining management CLI (`install`, `purge`, cache) | required | gap |
 | PDF parsing | planned | later |
 | Declarative click/type/wait/scroll actions | planned with strict limits | later |
 | Schema-guided JSON extraction | planned via optional caller-supplied model | later |

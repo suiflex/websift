@@ -1,7 +1,7 @@
 # Websift — Architecture
 
 Status: **approved target architecture; partial implementation**  
-Last updated: 2026-08-10  
+Last updated: 2026-08-11  
 Related: [Product and technical specification](SPEC.md) · [Installation and distribution](INSTALLATION.md)
 
 > **Implementation snapshot.** The current Rust core provides configuration/profile handling, public URL policy primitives, bounded native HTTP and HTML/plain-text extraction, zero-configuration search with an optional SearXNG backend, static mapping, crawl lifecycle/background execution with robots checks, worker handshake plus extraction mode, and embedded SQLite persistence. Playwright/Chromium rendering is not implemented; scheduler leases, global/per-host concurrency, retries, crash resume, and complete worker artifact integration are still target behavior. Packaging, installers, and the management CLI are also not implemented. The sections below preserve the target design and must not be read as shipped capability unless the snapshot or status matrix says so.
