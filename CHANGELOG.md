@@ -3,7 +3,7 @@
 Notable changes per release. Versions follow semantic versioning; the release tag is the version
 prefixed with `v`, which is also the tag `websift update` compares against.
 
-## Unreleased
+## 0.2.2 — 2026-08-12
 
 ### Fixed
 
@@ -17,7 +17,14 @@ prefixed with `v`, which is also the tag `websift update` compares against.
   read the applied version before taking a write lock, so both ran the same `CREATE TABLE` and the
   loser failed to start with `storage initialization failed`. The SQLite busy timeout is also set
   before the journal is switched to WAL, which needs a brief exclusive lock; setting it afterwards
-  meant a simultaneous start failed with `database is locked` rather than waiting.
+  meant a simultaneous start failed with `database is locked` rather than waiting. SQLite refuses
+  some lock upgrades outright instead of routing them to the busy handler, so switching the
+  journal and applying migrations both retry while the database reports busy.
+
+### Changed
+
+- The README follows the layout used across the organization: status, install, tools,
+  configuration, and documentation links, each answerable at a glance.
 
 ## 0.2.1 — 2026-08-12
 

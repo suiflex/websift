@@ -1,57 +1,142 @@
-# Websift
+# Websift — web retrieval for AI agents
 
-Open-source, local-first web search and crawling for AI agents.
+<p align="center">
+  <strong>Search, research, scrape, map, and crawl the public web.<br>One Rust binary, no API key, no model calls in the core.</strong>
+</p>
 
-The runnable server exposes configuration/status plus bounded web retrieval tools: `web_search`, `web_deep_search`, `web_scrape`, `web_map`, and asynchronous crawl lifecycle tools. `web_deep_search` runs a bounded multi-query research pass — search, deduplicate, rank with explainable signals, fetch the top pages — and returns ranked sources rather than a synthesized answer. It retries transient failures, falls back to the built-in backend when a configured instance is blocked, honors `robots.txt` and per-host limits, caches extractions in SQLite, and stops at a wall-clock budget. Pass `"format": "compact"` for cited text blocks instead of full source records when context is tight. Nothing has to be configured: search uses a built-in keyless backend, and a self-hosted SearXNG instance is an optional privacy upgrade. Native HTTP fetching and extraction are implemented; browser rendering and the full production scheduler remain explicit gaps (see the status matrix).
+<p align="center">
+  <a href="https://github.com/suiflex/websift/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/suiflex/websift/ci.yml?branch=develop&style=for-the-badge" alt="CI status"></a>
+  <a href="https://github.com/suiflex/websift/releases"><img src="https://img.shields.io/github/v/tag/suiflex/websift?include_prereleases&style=for-the-badge&label=release" alt="Release"></a>
+  <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-stdio-4ade80?style=for-the-badge" alt="MCP stdio"></a>
+</p>
+
+Websift gives an agent harness a consistent way to reach the web. It runs as an MCP stdio server,
+so your harness starts it when a tool is called and stops it afterwards — nothing to keep running,
+no port to open, no account to create.
+
+Search works out of the box through a built-in keyless backend. Point it at your own
+[SearXNG](https://docs.searxng.org) instance when you want queries to stay private.
+
+The core never calls a model. `web_deep_search` plans queries, ranks sources with explainable
+signals, and returns those sources; your agent writes the answer.
+
+[Documentation](./docs) · [Install](#install) · [Tools](#tools) · [Configuration](#configuration) · [Backlog](./docs/BACKLOG.md) · [Changelog](./CHANGELOG.md)
+
+---
+
+## Project status
+
+**Pre-v1.0, under active development.** Working today:
+
+- `web_search` and `web_deep_search`, with retries, backend fallback, and a wall-clock budget.
+- `web_scrape` and `web_map` over native HTTP, with bounded Markdown extraction.
+- Asynchronous crawl jobs with status, pagination, cancellation, and robots checks.
+- Durable SQLite state, a page cache, and structured stderr events.
+- Checksum-verified installers and self-update for macOS, Linux, and Windows on x86-64 and arm64.
+
+Known gaps, tracked in [docs/BACKLOG.md](./docs/BACKLOG.md):
+
+- JavaScript rendering is not integrated; extraction is static only.
+- Retrieval against the live public web is not yet verified in continuous integration.
+- The full crawl scheduler — leases, resume, incremental recrawl — is incomplete.
 
 ## Install
 
-macOS and Linux:
+**macOS and Linux**
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/suiflex/websift/main/install.sh | sh
 ```
 
-Windows (PowerShell):
+Installs to `~/.local/bin`. Add that directory to your `PATH` if the installer says so.
+
+**Windows (PowerShell)**
 
 ```powershell
 irm https://raw.githubusercontent.com/suiflex/websift/main/install.ps1 | iex
 ```
 
-Both installers verify the release checksum before extracting anything, install to a per-user directory without sudo or administrator rights, and print the command that registers the server with your agent. Then:
+Installs to `%LOCALAPPDATA%\Programs\websift` and adds it to your user `PATH`. Reopen your
+terminal afterwards.
+
+Both installers verify the release checksum before extracting anything, and neither needs `sudo`
+nor administrator rights.
+
+### Register it with your harness
+
+One command, once. Use the absolute path the installer prints: a desktop harness often does not
+inherit your shell `PATH`.
 
 ```sh
-claude mcp add --scope user websift -- websift mcp --profile claude-code
-codex mcp add websift -- websift mcp --profile codex
+claude mcp add --scope user websift -- ~/.local/bin/websift mcp --profile claude-code
+codex mcp add websift -- ~/.local/bin/websift mcp --profile codex
 ```
 
-No environment variable is required. Run `websift doctor` to check an installation.
+Then confirm the installation:
 
-Staying current:
+```sh
+websift doctor
+```
+
+Nothing runs in the background afterwards. Your harness spawns `websift mcp` when a tool is called.
+
+### Update
 
 ```sh
 websift update --check   # report whether a newer release exists; changes nothing
-websift update           # download, verify the checksum, and replace the binary
+websift update           # download, verify the checksum, replace the binary
 ```
 
-From a source checkout:
+## Tools
+
+| Tool | What it does |
+| --- | --- |
+| `web_search` | Search the public web and return ranked, deduplicated results |
+| `web_deep_search` | Research one question: several bounded queries, ranked sources with explainable signals, top pages fetched. Returns sources, never an answer |
+| `web_scrape` | Fetch one page and extract bounded Markdown, links, and metadata |
+| `web_map` | Discover URLs from a sitemap and start-page links without scraping every page |
+| `web_crawl_start` | Start a bounded crawl job |
+| `web_crawl_status` | Inspect a job's counters and state |
+| `web_crawl_results` | Read a page of results |
+| `web_crawl_cancel` | Stop scheduling new pages |
+| `websift_status` | Report the running version and profile |
+
+Pass `"format": "compact"` to `web_deep_search` for numbered, cited text blocks instead of full
+source records when your context window is tight.
+
+Every fetch honors `robots.txt`, refuses private and link-local destinations, bounds redirects,
+and caps response size. Page content is untrusted data; whatever reads it should treat it that way.
+
+## Configuration
+
+No variable is required. Every one below has a working default.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `WEBSIFT_SEARXNG_URL` | none | Your SearXNG instance. When set, it replaces the built-in backend |
+| `WEBSIFT_SEARCH_FALLBACK` | `0` | Allow a failing SearXNG instance to fall back to the public backend. Off, so a private instance stays private |
+| `WEBSIFT_TIMEOUT` | `10s` | Timeout per outbound request |
+| `WEBSIFT_MAX_RESULTS` | `10` | Search results per query; ceiling `50` |
+| `WEBSIFT_MAX_BYTES` | `2000000` | Maximum response bytes |
+| `WEBSIFT_CRAWL_CONCURRENCY` | `4` | Global request limit; ceiling `32` |
+| `WEBSIFT_PER_HOST_CONCURRENCY` | `2` | Request limit per host |
+| `WEBSIFT_CACHE_TTL_MS` | `900000` | Page-cache lifetime; below one second disables the cache |
+| `WEBSIFT_DEEP_SEARCH_BUDGET_MS` | `60000` | Wall-clock ceiling for one `web_deep_search` |
+| `WEBSIFT_LOG` | `json` | `off` silences the structured stderr events |
+| `WEBSIFT_PROFILE` | `default` | Local namespace, so two harnesses keep separate state |
+| `WEBSIFT_DATA_DIR` | platform data directory | Where state and artifacts live |
+
+Full contract: [docs/SPEC.md](./docs/SPEC.md).
+
+## From source
 
 ```sh
 cargo run -- mcp --profile codex
 ```
 
-## Documentation
+Checks that must pass before a change lands:
 
-- [Documentation index](docs/README.md)
-- [Product specification](docs/SPEC.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Installation and distribution](docs/INSTALLATION.md)
-- [Backlog](docs/BACKLOG.md)
-- [Changelog](CHANGELOG.md)
-
-## Development checks
-
-```bash
+```sh
 cargo fmt --check
 cargo check --all-targets
 cargo test
@@ -59,3 +144,14 @@ cargo clippy --all-targets -- -D warnings
 npm test --prefix browser-worker
 jq empty schemas/worker-v1.schema.json
 ```
+
+Continuous integration runs these on Linux, macOS, and Windows.
+
+## Documentation
+
+- [Documentation index](./docs/README.md)
+- [Specification](./docs/SPEC.md) — product contract, tool schemas, error codes
+- [Architecture](./docs/ARCHITECTURE.md) — component boundaries and security invariants
+- [Installation](./docs/INSTALLATION.md) — distribution and update behavior
+- [Backlog](./docs/BACKLOG.md) — known gaps, ranked
+- [Changelog](./CHANGELOG.md)
