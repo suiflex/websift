@@ -27,6 +27,13 @@ codex mcp add websift -- websift mcp --profile codex
 
 No environment variable is required. Run `websift doctor` to check an installation.
 
+Staying current:
+
+```sh
+websift update --check   # report whether a newer release exists; changes nothing
+websift update           # download, verify the checksum, and replace the binary
+```
+
 From a source checkout:
 
 ```sh

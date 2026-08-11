@@ -39,29 +39,36 @@ jobs:
         run: |
           set -eu
           release_dir="target/${{ matrix.target }}/release"
+          mkdir -p dist
           # The binary must sit at the archive root: both installers extract it flat.
           case "${{ matrix.target }}" in
             *windows*)
+              binary="websift.exe"
               asset="websift-${GITHUB_REF_NAME}-${{ matrix.target }}.zip"
-              (cd "$release_dir" && 7z a "$OLDPWD/$asset" websift.exe > /dev/null)
+              (cd "$release_dir" && 7z a "$OLDPWD/dist/$asset" "$binary" > /dev/null)
               ;;
             *)
+              binary="websift"
               asset="websift-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.gz"
-              tar -czf "$asset" -C "$release_dir" websift
+              tar -czf "dist/$asset" -C "$release_dir" "$binary"
               ;;
           esac
-          if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum "$asset" > "$asset.sha256"
-          else
-            shasum -a 256 "$asset" > "$asset.sha256"
-          fi
+          # `websift update` downloads the bare binary, so it needs no archive support.
+          bare="websift-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          case "${{ matrix.target }}" in *windows*) bare="$bare.exe" ;; esac
+          cp "${release_dir}/${binary}" "dist/$bare"
+          cd dist
+          for file in "$asset" "$bare"; do
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$file" > "$file.sha256"
+            else
+              shasum -a 256 "$file" > "$file.sha256"
+            fi
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
-          path: |
-            websift-*.tar.gz
-            websift-*.zip
-            websift-*.sha256
+          path: dist/*
           if-no-files-found: error
 
   publish:
@@ -73,7 +80,4 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          files: |
-            websift-*.tar.gz
-            websift-*.zip
-            websift-*.sha256
+          files: websift-*

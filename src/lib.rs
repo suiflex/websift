@@ -9,6 +9,7 @@ pub mod crawl;
 pub mod fetch;
 pub mod policy;
 pub mod storage;
+pub mod update;
 pub mod worker;
 
 /// Worker protocol implemented by both the Rust core and TypeScript worker.

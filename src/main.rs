@@ -1,4 +1,4 @@
-use std::{error::Error, process::ExitCode};
+use std::{error::Error, process::ExitCode, time::Duration};
 
 use rmcp::{ServiceExt, transport::stdio};
 use serde::Serialize;
@@ -6,9 +6,10 @@ use websift::{
     adapters::McpServer,
     application::RuntimeStatus,
     config::{BrowserMode, Config},
+    update::{Updater, replace_executable},
 };
 
-const USAGE: &str = "usage: websift <mcp|status|setup|doctor> [options]";
+const USAGE: &str = "usage: websift <mcp|status|setup|doctor|update> [options]";
 
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
@@ -16,6 +17,7 @@ enum Command {
     Status,
     SetupLite,
     Doctor,
+    Update { check_only: bool },
 }
 
 #[derive(Debug, Serialize)]
@@ -69,7 +71,61 @@ async fn run() -> Result<(), Box<dyn Error>> {
         }
         Command::SetupLite => print_setup_lite(Config::from_env()?)?,
         Command::Doctor => print_doctor(Config::from_env()?)?,
+        Command::Update { check_only } => run_update(check_only).await?,
     }
+    Ok(())
+}
+
+async fn run_update(check_only: bool) -> Result<(), Box<dyn Error>> {
+    let updater = Updater::new(Duration::from_secs(30))?;
+    let status = updater.check().await?;
+
+    if !status.available {
+        println!(
+            "{}",
+            serde_json::json!({
+                "command": "update",
+                "current": status.current,
+                "latest": status.latest,
+                "update_available": false,
+                "changed": false,
+                "message": "already on the latest release",
+            })
+        );
+        return Ok(());
+    }
+
+    if check_only {
+        println!(
+            "{}",
+            serde_json::json!({
+                "command": "update",
+                "current": status.current,
+                "latest": status.latest,
+                "update_available": true,
+                "changed": false,
+                "message": "run `websift update` to install it",
+            })
+        );
+        return Ok(());
+    }
+
+    // Resolve the real path first: replacing a symlink would leave the installed binary untouched.
+    let executable = std::env::current_exe()?.canonicalize()?;
+    let binary = updater.download_verified(&status.latest).await?;
+    replace_executable(&executable, &binary)?;
+    println!(
+        "{}",
+        serde_json::json!({
+            "command": "update",
+            "current": status.current,
+            "latest": status.latest,
+            "update_available": true,
+            "changed": true,
+            "path": executable.display().to_string(),
+            "message": "updated; restart any running websift MCP server",
+        })
+    );
     Ok(())
 }
 
@@ -99,9 +155,14 @@ fn parse_command(args: impl IntoIterator<Item = String>) -> Result<Command, &'st
             }
             _ => Err(USAGE),
         },
-        Some("install" | "update" | "purge") => Err(
-            "unsupported: installers, package distribution, and update management are not shipped",
-        ),
+        Some("update") => match (args.next().as_deref(), args.next()) {
+            (None, None) => Ok(Command::Update { check_only: false }),
+            (Some("--check"), None) => Ok(Command::Update { check_only: true }),
+            _ => Err(USAGE),
+        },
+        Some("install" | "purge") => {
+            Err("unsupported: installers and package removal are not shipped")
+        }
         _ => Err(USAGE),
     }
 }

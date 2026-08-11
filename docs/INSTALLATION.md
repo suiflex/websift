@@ -3,7 +3,7 @@
 Status: **binary installers shipped; npm distribution and management CLI remain unimplemented**  
 Last updated: 2026-08-11
 
-> Released binaries are published for macOS, Linux, and Windows on x86_64 and aarch64, and the `install.sh` / `install.ps1` scripts install them with checksum verification. Configuration/profile handling, native retrieval, extraction, search, mapping, crawl lifecycle, worker extraction, and embedded SQLite state are available. The CLI provides machine-readable `status`, `doctor`, and configuration-only `setup --lite`. npm distribution, browser/Playwright setup, automatic client registration, full `setup`, `install`, cache, update, and purge commands are not shipped.
+> Released binaries are published for macOS, Linux, and Windows on x86_64 and aarch64, and the `install.sh` / `install.ps1` scripts install them with checksum verification. Configuration/profile handling, native retrieval, extraction, search, mapping, crawl lifecycle, worker extraction, and embedded SQLite state are available. The CLI provides machine-readable `status`, `doctor`, and configuration-only `setup --lite`. `websift update` and `websift update --check` are implemented. npm distribution, browser/Playwright setup, automatic client registration, full `setup`, `install`, cache, and purge commands are not shipped.
 
 ## 1. Installation promise
 
@@ -303,9 +303,18 @@ Requirements:
 
 ## 10. Updates and compatibility
 
-- No background self-update in v1.
-- `websift update` checks, downloads, verifies, and atomically switches versions.
-- `websift update --check` performs no mutation.
+- No background self-update in v1: an update happens only when the user asks for it.
+- `websift update` compares the running version with the latest published release, downloads that
+  release's binary for the running platform, verifies its SHA-256 against the checksum published
+  beside it, and only then replaces the executable through a same-directory rename. A failed
+  download, checksum, or rename leaves the installed binary untouched.
+- `websift update --check` performs no mutation and reports `update_available`.
+- Both print one JSON object, so a harness can act on the result without parsing prose.
+- The updater resolves symlinks first, so it replaces the real binary rather than a link to it.
+- Windows cannot overwrite a running image, so the previous executable is moved to `.old` and
+  removed on a later run.
+- Downloads go through the same public-address policy as retrieval: an update cannot be redirected
+  to a private or loopback address, and HTTPS is never downgraded.
 - The executable and worker are always upgraded as one release unit.
 - Chromium compatibility is tied to that release and repaired by `websift setup`.
 - Rollback retains a compatible state backup when a migration changed storage.
