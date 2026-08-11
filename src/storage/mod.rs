@@ -92,8 +92,12 @@ impl Store {
         database_path: Option<std::path::PathBuf>,
         shared_memory_uri: Option<String>,
     ) -> Result<Self> {
+        // busy_timeout comes first. Switching the journal to WAL needs a brief exclusive lock, so
+        // with the timeout set afterwards a second process starting at the same moment fails
+        // immediately with "database is locked" instead of waiting the way every later statement
+        // does.
         connection.execute_batch(
-            "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;",
+            "PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;",
         )?;
         apply_migrations(&connection)?;
         Ok(Self {

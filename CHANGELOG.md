@@ -15,7 +15,9 @@ prefixed with `v`, which is also the tag `websift update` compares against.
   the cache is disabled instead.
 - Two processes opening the same database at the same time no longer race during migration. Both
   read the applied version before taking a write lock, so both ran the same `CREATE TABLE` and the
-  loser failed to start with `storage initialization failed`.
+  loser failed to start with `storage initialization failed`. The SQLite busy timeout is also set
+  before the journal is switched to WAL, which needs a brief exclusive lock; setting it afterwards
+  meant a simultaneous start failed with `database is locked` rather than waiting.
 
 ## 0.2.1 — 2026-08-12
 
