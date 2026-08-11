@@ -144,8 +144,26 @@ impl Store {
     }
 }
 
+/// Apply pending migrations exactly once, even when several processes open the same database.
+///
+/// The applied version is read inside a write transaction rather than before one. Two processes
+/// starting together would otherwise both observe version zero and both run the same `CREATE
+/// TABLE`, and the loser would fail to open a database that is in fact fine.
 fn apply_migrations(connection: &Connection) -> Result<()> {
     connection.execute_batch("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);")?;
+    // BEGIN IMMEDIATE takes the write lock now; `busy_timeout` makes the other process wait for
+    // it instead of failing, and it then sees the migrations already applied.
+    connection.execute_batch("BEGIN IMMEDIATE")?;
+    let result = migrate_within_transaction(connection);
+    if result.is_ok() {
+        connection.execute_batch("COMMIT")?;
+    } else {
+        let _ = connection.execute_batch("ROLLBACK");
+    }
+    result
+}
+
+fn migrate_within_transaction(connection: &Connection) -> Result<()> {
     let applied = connection.query_row(
         "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
         [],
@@ -159,13 +177,11 @@ fn apply_migrations(connection: &Connection) -> Result<()> {
         });
     }
     for (index, (name, sql)) in MIGRATIONS.iter().enumerate().skip(applied as usize) {
-        let transaction = connection.unchecked_transaction()?;
-        transaction.execute_batch(sql)?;
-        transaction.execute(
+        connection.execute_batch(sql)?;
+        connection.execute(
             "INSERT INTO schema_migrations (version, name) VALUES (?1, ?2)",
             params![index as i64 + 1, name],
         )?;
-        transaction.commit()?;
     }
     Ok(())
 }
@@ -434,6 +450,36 @@ mod tests {
                 )
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn opening_one_database_from_several_threads_applies_migrations_once() {
+        let path = std::env::temp_dir().join(format!(
+            "websift-migrate-race-{}-{}.sqlite3",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default()
+        ));
+        let opened: Vec<_> = (0..8)
+            .map(|_| {
+                let path = path.clone();
+                std::thread::spawn(move || Store::open(path).map(|_| ()))
+            })
+            .collect();
+        for handle in opened {
+            handle.join().expect("thread joins").expect("store opens");
+        }
+        let store = Store::open(&path).unwrap();
+        let applied: i64 = store
+            .connection()
+            .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(applied, super::MIGRATIONS.len() as i64);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

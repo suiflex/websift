@@ -13,6 +13,9 @@ prefixed with `v`, which is also the tag `websift update` compares against.
   back in.
 - A `WEBSIFT_CACHE_TTL_MS` below one second no longer writes cache rows that can never be read;
   the cache is disabled instead.
+- Two processes opening the same database at the same time no longer race during migration. Both
+  read the applied version before taking a write lock, so both ran the same `CREATE TABLE` and the
+  loser failed to start with `storage initialization failed`.
 
 ## 0.2.1 — 2026-08-12
 
