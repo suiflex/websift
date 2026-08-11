@@ -6,11 +6,9 @@ browser-worker/dist/
 *.sqlite-shm
 *.sqlite-wal
 .websift/
-docs/
 # Local agent and tooling state
 .agents/
 .claude/
 .codex/
 .forgeguard/
 .impeccable/
-.forgeguard
