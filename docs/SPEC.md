@@ -111,6 +111,7 @@ Configuration is environment-first so the same binary works under MCP launchers 
 | `WEBSIFT_PER_HOST_CONCURRENCY` | `2` | Per-host request limit |
 | `WEBSIFT_CACHE_TTL_MS` | `900000` | Page-cache lifetime for `web_deep_search` fetches; `0` disables the cache |
 | `WEBSIFT_DEEP_SEARCH_BUDGET_MS` | `60000` | Wall-clock ceiling for one `web_deep_search` operation; range `1000`-`600000` |
+| `WEBSIFT_SEARCH_FALLBACK` | `0` | Allow a failing configured SearXNG instance to fall back to the built-in public backend. Off by default so a private instance stays private |
 | `WEBSIFT_LOG` | `json` | `off` silences structured stderr events |
 | `WEBSIFT_BROWSER` | `auto` | `auto`, `enabled`, or `disabled` browser-worker policy |
 | `WEBSIFT_DATA_DIR` | platform data directory | Advanced override for automatically managed state and artifacts |
@@ -177,7 +178,7 @@ Output:
 
 Results are deduplicated by normalized final URL while preserving provider order. `rank` is positional, not a universal relevance probability. `source` and `provider` name the backend that actually served the request: `duckduckgo` for the built-in backend, `searxng` when an instance is configured. A backend response that cannot be parsed is reported as `provider_unavailable` instead of an empty result list.
 
-`web_search` and `web_deep_search` share one resilient search path. A transient, rate-limited, or blocked response is retried up to three attempts with exponential backoff from 250ms, and a configured SearXNG instance falls back to the built-in backend rather than failing the call. The whole call, including every retry and fallback, is bounded by `WEBSIFT_TIMEOUT` multiplied by the attempt count. Because a fallback can change which backend answers, `source` and `provider` report the backend that actually produced the results, not the configured preference. Failures that are decisions rather than accidents — invalid configuration, an oversized response — are never retried.
+`web_search` and `web_deep_search` share one resilient search path. A transient, rate-limited, or blocked response is retried up to three attempts with exponential backoff from 250ms. A configured SearXNG instance falls back to the built-in backend only when `WEBSIFT_SEARCH_FALLBACK` is set: configuring a private instance is a decision not to send queries to a public engine, and a transient failure must not quietly reverse it. The whole call, including every retry and fallback, is bounded by `WEBSIFT_TIMEOUT` multiplied by the attempt count. Because a fallback can change which backend answers, `source` and `provider` report the backend that actually produced the results, not the configured preference. Failures that are decisions rather than accidents — invalid configuration, an oversized response — are never retried.
 
 ### `web_scrape`
 
@@ -271,8 +272,9 @@ tight context window use it to spend fewer tokens without losing citations.
 
 Production behavior applied to every call:
 
-- **Backend fallback.** When a SearXNG instance is configured it is tried first; a transient,
-  rate-limited, or blocked response falls back to the built-in backend rather than failing.
+- **Backend fallback.** When a SearXNG instance is configured it is tried first. Falling back to
+  the built-in public backend requires `WEBSIFT_SEARCH_FALLBACK`, because a private instance is
+  configured precisely to keep queries off a public engine.
 - **Retries.** Transient search and fetch failures are retried up to three attempts with
   exponential backoff from 250ms. Validation, size, and media-type failures are decisions, not
   accidents, and are never retried.
@@ -283,7 +285,8 @@ Production behavior applied to every call:
 - **Concurrency.** `WEBSIFT_CRAWL_CONCURRENCY` bounds fetches globally and
   `WEBSIFT_PER_HOST_CONCURRENCY` bounds them per host.
 - **Cache.** Extractions are cached in profile-scoped SQLite, keyed by URL and extraction bound,
-  for `WEBSIFT_CACHE_TTL_MS`. Cached sources report `content_source: "cache"`, and expired rows
+  for `WEBSIFT_CACHE_TTL_MS`. Values below one second disable the cache rather than writing rows
+  that expire before they can be read. Cached sources report `content_source: "cache"`, and expired rows
   are purged on write.
 - **Duplicates.** Sources whose fetched bytes hash identically to a higher ranked source keep
   their citation, drop the repeated body, and report `duplicate_of`.

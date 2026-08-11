@@ -29,6 +29,11 @@ pub struct Config {
     pub cache_ttl_ms: u64,
     /// Wall-clock ceiling for one `web_deep_search` operation.
     pub deep_search_budget_ms: u64,
+    /// Whether a failing configured instance may fall back to the built-in public backend.
+    ///
+    /// Off by default: a caller who configures a private instance is choosing not to send
+    /// queries to a public engine, and a transient failure must not quietly undo that choice.
+    pub search_fallback: bool,
     pub browser: BrowserMode,
     pub spool_root: PathBuf,
     pub worker_program: PathBuf,
@@ -126,6 +131,7 @@ impl Config {
             1_000,
             600_000,
         )?;
+        let search_fallback = parse_flag(&mut lookup, "WEBSIFT_SEARCH_FALLBACK")?;
         let browser = match lookup("WEBSIFT_BROWSER").as_deref().unwrap_or("auto") {
             "auto" => BrowserMode::Auto,
             "enabled" => BrowserMode::Enabled,
@@ -163,6 +169,7 @@ impl Config {
             per_host_concurrency,
             cache_ttl_ms,
             deep_search_budget_ms,
+            search_fallback,
             browser,
             spool_root,
             worker_program,
@@ -230,6 +237,15 @@ fn parse_timeout_ms(lookup: &mut impl FnMut(&str) -> Option<String>) -> Result<u
     Ok(parsed)
 }
 
+/// Parse an off-by-default boolean switch.
+fn parse_flag(lookup: &mut impl FnMut(&str) -> Option<String>, key: &str) -> Result<bool, String> {
+    match lookup(key).as_deref() {
+        None | Some("0" | "false") => Ok(false),
+        Some("1" | "true") => Ok(true),
+        Some(value) => Err(format!("{key} must be 0, 1, true, or false: {value}")),
+    }
+}
+
 fn parse_u64(
     lookup: &mut impl FnMut(&str) -> Option<String>,
     key: &str,
@@ -285,6 +301,28 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn search_fallback_is_off_unless_explicitly_requested() {
+        use super::Config;
+        assert!(!Config::from_lookup(|_| None).unwrap().search_fallback);
+        assert!(
+            Config::from_lookup(|key| (key == "WEBSIFT_SEARCH_FALLBACK").then(|| "1".to_owned()))
+                .unwrap()
+                .search_fallback
+        );
+        assert!(
+            !Config::from_lookup(
+                |key| (key == "WEBSIFT_SEARCH_FALLBACK").then(|| "false".to_owned())
+            )
+            .unwrap()
+            .search_fallback
+        );
+        assert!(
+            Config::from_lookup(|key| (key == "WEBSIFT_SEARCH_FALLBACK").then(|| "yes".to_owned()))
+                .is_err()
+        );
+    }
+
     use std::path::PathBuf;
 
     use super::{BrowserMode, Config};

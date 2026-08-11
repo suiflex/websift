@@ -3,6 +3,17 @@
 Notable changes per release. Versions follow semantic versioning; the release tag is the version
 prefixed with `v`, which is also the tag `websift update` compares against.
 
+## Unreleased
+
+### Fixed
+
+- A configured SearXNG instance no longer falls back to the built-in public backend by default.
+  Configuring a private instance is a decision not to send queries to a public engine, and 0.2.0
+  and 0.2.1 quietly reversed that on any transient failure. Set `WEBSIFT_SEARCH_FALLBACK=1` to opt
+  back in.
+- A `WEBSIFT_CACHE_TTL_MS` below one second no longer writes cache rows that can never be read;
+  the cache is disabled instead.
+
 ## 0.2.1 — 2026-08-12
 
 ### Fixed

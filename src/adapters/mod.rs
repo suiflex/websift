@@ -410,6 +410,7 @@ impl McpServer {
                 per_host_concurrency: 2,
                 cache_ttl_ms: 900_000,
                 deep_search_budget_ms: 60_000,
+                search_fallback: false,
                 browser: crate::config::BrowserMode::Auto,
                 spool_root: std::path::PathBuf::from("/tmp/websift-spool"),
                 worker_program: std::path::PathBuf::from("node"),
@@ -616,7 +617,9 @@ impl McpServer {
             search: &search,
             fetch: &fetch,
             robots: &robots,
-            cache: (self.config.cache_ttl_ms > 0).then_some(&cache as &dyn PageStore),
+            // Below one second the stored TTL truncates to zero, so every write would be
+            // unreadable; that is a disabled cache, not a very short one.
+            cache: (self.config.cache_ttl_ms >= 1_000).then_some(&cache as &dyn PageStore),
         };
         let bundle = match deep_search(&deps, &request).await {
             Ok(bundle) => bundle,
@@ -680,13 +683,15 @@ impl McpServer {
 
     /// Search backends in preference order.
     ///
-    /// A configured instance stays first; the keyless backend is appended so that one blocked or
-    /// unreachable instance degrades result quality instead of removing search.
+    /// A configured instance stays first. The public keyless backend is appended only when
+    /// `WEBSIFT_SEARCH_FALLBACK` asks for it: configuring a private instance is a decision not to
+    /// send queries to a public engine, and a transient failure must not quietly reverse it.
     fn search_chain(&self) -> Result<Vec<SearchClient>, String> {
         let primary =
             SearchClient::from_config(&self.config).map_err(|error| stable_search_error(&error))?;
         let mut chain = vec![primary];
         if self.config.searxng_url.is_some()
+            && self.config.search_fallback
             && let Ok(builtin) = SearchClient::builtin(
                 Duration::from_millis(self.config.timeout_ms),
                 self.config.max_bytes,
@@ -1223,6 +1228,7 @@ mod tests {
             per_host_concurrency: 3,
             cache_ttl_ms: 900_000,
             deep_search_budget_ms: 60_000,
+            search_fallback: false,
             browser: crate::config::BrowserMode::Disabled,
             spool_root: std::path::PathBuf::from("/tmp/websift-spool"),
             worker_program: std::path::PathBuf::from("node"),
@@ -1376,6 +1382,37 @@ mod tests {
             domains: Vec::new(),
             format: "full".to_owned(),
         }
+    }
+
+    #[test]
+    fn a_configured_instance_never_falls_back_to_a_public_backend_unless_asked() {
+        let mut config = test_config();
+        assert!(config.searxng_url.is_some());
+        let private_only = McpServer::from_config(config.clone())
+            .unwrap()
+            .search_chain()
+            .unwrap();
+        // Configuring a private instance is a privacy decision, so the public backend is absent.
+        assert_eq!(private_only.len(), 1);
+        assert_eq!(private_only[0].provider(), "searxng");
+
+        config.search_fallback = true;
+        let with_fallback = McpServer::from_config(config.clone())
+            .unwrap()
+            .search_chain()
+            .unwrap();
+        assert_eq!(with_fallback.len(), 2);
+        assert_eq!(with_fallback[1].provider(), "duckduckgo");
+
+        // Without an instance the built-in backend is the only one, fallback flag or not.
+        config.searxng_url = None;
+        config.search_fallback = false;
+        let builtin_only = McpServer::from_config(config)
+            .unwrap()
+            .search_chain()
+            .unwrap();
+        assert_eq!(builtin_only.len(), 1);
+        assert_eq!(builtin_only[0].provider(), "duckduckgo");
     }
 
     #[tokio::test]
