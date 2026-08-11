@@ -6,6 +6,8 @@ browser-worker/dist/
 *.sqlite-shm
 *.sqlite-wal
 .websift/
+# Documentation is kept out of the public repository by choice.
+docs/
 # Local agent and tooling state
 .agents/
 .claude/

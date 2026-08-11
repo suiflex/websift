@@ -20,7 +20,7 @@ Search works out of the box through a built-in keyless backend. Point it at your
 The core never calls a model. `web_deep_search` plans queries, ranks sources with explainable
 signals, and returns those sources; your agent writes the answer.
 
-[Documentation](./docs) · [Install](#install) · [Tools](#tools) · [Configuration](#configuration) · [Backlog](./docs/BACKLOG.md) · [Changelog](./CHANGELOG.md)
+[Install](#install) · [Tools](#tools) · [Configuration](#configuration) · [Changelog](./CHANGELOG.md)
 
 ---
 
@@ -34,7 +34,7 @@ signals, and returns those sources; your agent writes the answer.
 - Durable SQLite state, a page cache, and structured stderr events.
 - Checksum-verified installers and self-update for macOS, Linux, and Windows on x86-64 and arm64.
 
-Known gaps, tracked in [docs/BACKLOG.md](./docs/BACKLOG.md):
+Known gaps:
 
 - JavaScript rendering is not integrated; extraction is static only.
 - Retrieval against the live public web is not yet verified in continuous integration.
@@ -126,8 +126,6 @@ No variable is required. Every one below has a working default.
 | `WEBSIFT_PROFILE` | `default` | Local namespace, so two harnesses keep separate state |
 | `WEBSIFT_DATA_DIR` | platform data directory | Where state and artifacts live |
 
-Full contract: [docs/SPEC.md](./docs/SPEC.md).
-
 ## From source
 
 ```sh
@@ -147,11 +145,8 @@ jq empty schemas/worker-v1.schema.json
 
 Continuous integration runs these on Linux, macOS, and Windows.
 
-## Documentation
+## More
 
-- [Documentation index](./docs/README.md)
-- [Specification](./docs/SPEC.md) — product contract, tool schemas, error codes
-- [Architecture](./docs/ARCHITECTURE.md) — component boundaries and security invariants
-- [Installation](./docs/INSTALLATION.md) — distribution and update behavior
-- [Backlog](./docs/BACKLOG.md) — known gaps, ranked
-- [Changelog](./CHANGELOG.md)
+Every tool validates its arguments and returns stable error codes; call `websift_status` or
+`websift doctor` to see what a given installation actually loaded. Release-by-release changes are
+in the [changelog](./CHANGELOG.md).

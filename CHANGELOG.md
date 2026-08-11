@@ -23,8 +23,9 @@ prefixed with `v`, which is also the tag `websift update` compares against.
 
 ### Changed
 
-- The README follows the layout used across the organization: status, install, tools,
-  configuration, and documentation links, each answerable at a glance.
+- The README follows the layout used across the organization: status, install, tools, and
+  configuration, each answerable at a glance. It no longer links into `docs/`, which is kept out
+  of the published repository.
 
 ## 0.2.1 — 2026-08-12
 
