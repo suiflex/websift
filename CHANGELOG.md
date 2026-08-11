@@ -3,6 +3,24 @@
 Notable changes per release. Versions follow semantic versioning; the release tag is the version
 prefixed with `v`, which is also the tag `websift update` compares against.
 
+## 0.2.1 — 2026-08-12
+
+### Fixed
+
+- The browser worker no longer opens a console window on Windows. It is a console program, and an
+  MCP host is usually a GUI process with no console to inherit, so Windows opened one for it and
+  took focus. Every worker stream is piped, so that window never carried output.
+- `websift update` refuses a destination that is not a regular file. Windows renames the running
+  image aside before installing, which previously moved a directory standing at the destination
+  out of the way and installed the binary in its place.
+
+### Changed
+
+- CI compiles, tests, and lints on Windows and macOS as well as Linux. Platform-specific code was
+  previously first exercised on a release tag, which is how both fixes above reached `0.2.0`.
+- Tests no longer derive temporary directory names from the process id alone; two tests shared one
+  path and deleted each other's files under load.
+
 ## 0.2.0 — 2026-08-11
 
 ### Added
