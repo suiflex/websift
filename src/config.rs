@@ -11,6 +11,8 @@ const DEFAULT_MAX_BYTES: u64 = 2_000_000;
 const DEFAULT_CRAWL_CONCURRENCY: u16 = 4;
 const DEFAULT_SPOOL_ROOT: &str = "/tmp/websift-spool";
 const DEFAULT_PER_HOST_CONCURRENCY: u16 = 2;
+const DEFAULT_CACHE_TTL_MS: u64 = 900_000;
+const DEFAULT_DEEP_SEARCH_BUDGET_MS: u64 = 60_000;
 const DATA_DIR_ENV: &str = "WEBSIFT_DATA_DIR";
 
 /// Configuration selected when the process starts.
@@ -23,6 +25,10 @@ pub struct Config {
     pub max_bytes: u64,
     pub crawl_concurrency: u16,
     pub per_host_concurrency: u16,
+    /// Page-cache lifetime in milliseconds. `0` disables the cache.
+    pub cache_ttl_ms: u64,
+    /// Wall-clock ceiling for one `web_deep_search` operation.
+    pub deep_search_budget_ms: u64,
     pub browser: BrowserMode,
     pub spool_root: PathBuf,
     pub worker_program: PathBuf,
@@ -106,6 +112,20 @@ impl Config {
             1,
             32,
         )?;
+        let cache_ttl_ms = parse_u64(
+            &mut lookup,
+            "WEBSIFT_CACHE_TTL_MS",
+            DEFAULT_CACHE_TTL_MS,
+            0,
+            86_400_000,
+        )?;
+        let deep_search_budget_ms = parse_u64(
+            &mut lookup,
+            "WEBSIFT_DEEP_SEARCH_BUDGET_MS",
+            DEFAULT_DEEP_SEARCH_BUDGET_MS,
+            1_000,
+            600_000,
+        )?;
         let browser = match lookup("WEBSIFT_BROWSER").as_deref().unwrap_or("auto") {
             "auto" => BrowserMode::Auto,
             "enabled" => BrowserMode::Enabled,
@@ -141,6 +161,8 @@ impl Config {
             max_bytes,
             crawl_concurrency,
             per_host_concurrency,
+            cache_ttl_ms,
+            deep_search_budget_ms,
             browser,
             spool_root,
             worker_program,

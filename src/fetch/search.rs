@@ -112,6 +112,49 @@ impl SearchClient {
         )
     }
 
+    /// Construct a client pinned to the built-in keyless backend.
+    ///
+    /// Callers use this to keep searching when a configured instance is unreachable or rejects
+    /// the request, so one failing dependency does not remove search entirely.
+    pub fn builtin(
+        timeout: Duration,
+        max_bytes: u64,
+        max_results: u32,
+    ) -> Result<Self, SearchError> {
+        Self::with_backend(
+            Backend::Duckduckgo,
+            timeout,
+            max_bytes,
+            max_results,
+            Arc::new(SystemDnsResolver),
+        )
+    }
+
+    /// Build a SearXNG-backed client whose DNS is overridden, for loopback tests only.
+    #[cfg(test)]
+    pub(crate) fn with_dns_override<R: reqwest::dns::Resolve + 'static>(
+        endpoint: &str,
+        timeout: Duration,
+        max_bytes: u64,
+        max_results: u32,
+        resolver: Arc<R>,
+    ) -> Result<Self, SearchError> {
+        let endpoint = PublicUrl::parse(endpoint).map_err(SearchError::InvalidUrl)?;
+        let client = Client::builder()
+            .dns_resolver(resolver)
+            .connect_timeout(timeout)
+            .timeout(timeout)
+            .build()
+            .map_err(search_transport_error)?;
+        Ok(Self {
+            client,
+            backend: Backend::Searxng(endpoint),
+            timeout,
+            max_bytes,
+            max_results: max_results as usize,
+        })
+    }
+
     /// Construct a SearXNG client with explicit bounds.
     pub fn new(
         endpoint: &str,

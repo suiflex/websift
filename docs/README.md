@@ -1,12 +1,13 @@
 # Websift documentation
 
-Websift has a runnable retrieval and crawl foundation. The MCP stdio server exposes configuration/status, `web_search`, `web_scrape`, `web_map`, and crawl lifecycle tools, and requires no environment configuration to start. Native HTTP fetching/extraction, URL policy, robots checks, background crawl execution, worker extraction mode, durable SQLite state, platform installers, and checksum-verified self-update are implemented. Browser rendering, full scheduler recovery/concurrency behavior, the remaining management CLI, and complete worker integration remain gaps.
+Websift has a runnable retrieval and crawl foundation. The MCP stdio server exposes configuration/status, `web_search`, `web_deep_search`, `web_scrape`, `web_map`, and crawl lifecycle tools, and requires no environment configuration to start. Native HTTP fetching/extraction, URL policy, robots checks, background crawl execution, worker extraction mode, durable SQLite state, platform installers, and checksum-verified self-update are implemented. Browser rendering, full scheduler recovery/concurrency behavior, the remaining management CLI, and complete worker integration remain gaps.
 
 ## Documents
 
 - [Product and technical specification](SPEC.md) — product contract and phased acceptance criteria.
 - [Architecture](ARCHITECTURE.md) — component boundaries and security invariants.
 - [Installation and distribution](INSTALLATION.md) — shipped installers and update behavior, plus the remaining packaging contract.
+- [Backlog](BACKLOG.md) — known gaps left after the `web_deep_search` production pass, ranked by value per effort.
 
 ## Implementation status
 

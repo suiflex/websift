@@ -2,7 +2,7 @@
 
 Open-source, local-first web search and crawling for AI agents.
 
-The runnable server exposes configuration/status plus bounded web retrieval tools: `web_search`, `web_scrape`, `web_map`, and asynchronous crawl lifecycle tools. Nothing has to be configured: search uses a built-in keyless backend, and a self-hosted SearXNG instance is an optional privacy upgrade. Native HTTP fetching and extraction are implemented; browser rendering and the full production scheduler remain explicit gaps (see the status matrix).
+The runnable server exposes configuration/status plus bounded web retrieval tools: `web_search`, `web_deep_search`, `web_scrape`, `web_map`, and asynchronous crawl lifecycle tools. `web_deep_search` runs a bounded multi-query research pass — search, deduplicate, rank with explainable signals, fetch the top pages — and returns ranked sources rather than a synthesized answer. It retries transient failures, falls back to the built-in backend when a configured instance is blocked, honors `robots.txt` and per-host limits, caches extractions in SQLite, and stops at a wall-clock budget. Pass `"format": "compact"` for cited text blocks instead of full source records when context is tight. Nothing has to be configured: search uses a built-in keyless backend, and a self-hosted SearXNG instance is an optional privacy upgrade. Native HTTP fetching and extraction are implemented; browser rendering and the full production scheduler remain explicit gaps (see the status matrix).
 
 ## Install
 
@@ -46,6 +46,7 @@ cargo run -- mcp --profile codex
 - [Product specification](docs/SPEC.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Installation and distribution](docs/INSTALLATION.md)
+- [Backlog](docs/BACKLOG.md)
 
 ## Development checks
 

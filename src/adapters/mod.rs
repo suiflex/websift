@@ -26,7 +26,13 @@ use crate::{
         extract::{ExtractionOptions, extract},
         search::{SearchClient, SearchError, SearchOptions},
     },
-    storage::Store,
+    observe,
+    research::{
+        CachedPage, DeepSearchDeps, DeepSearchMeta, DeepSearchRequest, DeepSearchSource, PageStore,
+        ResearchWarning, deep_search, render_compact, search_with_fallback,
+    },
+    robots::RobotsGate,
+    storage::{CachedPage as StoredPage, Store},
     worker::{
         Operation, Options as WorkerOptions, Request as WorkerRequest, Spool, WorkerSupervisor,
     },
@@ -75,6 +81,121 @@ struct WebSearchMeta {
 
 fn default_search_limit() -> u32 {
     10
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct WebDeepSearchParams {
+    /// Research question. It is searched verbatim and supplies the term-coverage signal.
+    query: String,
+    /// Optional caller-written query variants. None are invented, so no model is involved.
+    #[serde(default)]
+    variants: Vec<String>,
+    #[serde(default = "default_deep_max_queries")]
+    max_queries: usize,
+    #[serde(default = "default_deep_max_sources")]
+    max_sources: usize,
+    #[serde(default = "default_deep_max_pages")]
+    max_pages: usize,
+    #[serde(default = "default_deep_max_chars")]
+    max_chars: usize,
+    language: Option<String>,
+    time_range: Option<String>,
+    /// Search scope; the same hosts act as the preferred-domain ranking signal.
+    #[serde(default)]
+    domains: Vec<String>,
+    /// `full` returns ranked sources with signals; `compact` returns cited text for tight context.
+    #[serde(default = "default_deep_format")]
+    format: String,
+}
+
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+struct WebDeepSearchResponse {
+    query: String,
+    queries: Vec<String>,
+    /// Ranked sources. Empty in `compact` format, where `compact` carries the same material.
+    sources: Vec<DeepSearchSource>,
+    /// Numbered, cited text blocks. Present only in `compact` format.
+    compact: Option<String>,
+    warnings: Vec<String>,
+    meta: DeepSearchMeta,
+    duration_ms: u128,
+}
+
+fn default_deep_format() -> String {
+    "full".to_owned()
+}
+
+/// Attempts per transient search or fetch failure, including the first try.
+/// Shared by `web_search` and `web_deep_search` so both degrade the same way.
+const SEARCH_ATTEMPTS: usize = 3;
+
+/// [`PageStore`] backed by the profile-scoped `SQLite` page cache.
+///
+/// Every call is synchronous and short: research only touches the cache between stages, so this
+/// lock is never held across an await.
+struct SqlitePageStore {
+    store: Arc<Mutex<Store>>,
+    profile: String,
+    ttl_seconds: i64,
+}
+
+impl PageStore for SqlitePageStore {
+    fn get(&self, url: &str, max_chars: usize) -> Option<CachedPage> {
+        let store = self.store.lock().ok()?;
+        store
+            .page_cache(&self.profile)
+            .get(
+                url,
+                max_chars,
+                chrono::Utc::now().timestamp(),
+                self.ttl_seconds,
+            )
+            .ok()
+            .flatten()
+            .map(|page| CachedPage {
+                final_url: page.final_url,
+                title: page.title,
+                markdown: page.markdown,
+                content_hash: page.content_hash,
+                truncated: page.truncated,
+            })
+    }
+
+    fn put(&self, url: &str, max_chars: usize, page: &CachedPage) {
+        let Ok(store) = self.store.lock() else {
+            return;
+        };
+        let cache = store.page_cache(&self.profile);
+        let now = chrono::Utc::now().timestamp();
+        // A cache write must never fail an otherwise successful research call.
+        let _ = cache.put(
+            url,
+            max_chars,
+            &StoredPage {
+                final_url: page.final_url.clone(),
+                title: page.title.clone(),
+                markdown: page.markdown.clone(),
+                content_hash: page.content_hash.clone(),
+                truncated: page.truncated,
+                fetched_at: now,
+            },
+        );
+        let _ = cache.purge_expired(now, self.ttl_seconds);
+    }
+}
+
+fn default_deep_max_queries() -> usize {
+    3
+}
+fn default_deep_max_sources() -> usize {
+    8
+}
+fn default_deep_max_pages() -> usize {
+    5
+}
+fn default_deep_max_chars() -> usize {
+    5_000
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -287,6 +408,8 @@ impl McpServer {
                 max_bytes: 2_000_000,
                 crawl_concurrency: 4,
                 per_host_concurrency: 2,
+                cache_ttl_ms: 900_000,
+                deep_search_budget_ms: 60_000,
                 browser: crate::config::BrowserMode::Auto,
                 spool_root: std::path::PathBuf::from("/tmp/websift-spool"),
                 worker_program: std::path::PathBuf::from("node"),
@@ -330,30 +453,14 @@ impl McpServer {
                 "invalid_input: query must be 1-500 characters and limit must be 1-50".to_owned(),
             );
         }
-        if params.domains.len() > 20
-            || params.domains.iter().any(|domain| {
-                domain.trim().is_empty()
-                    || domain.contains('/')
-                    || domain.contains(' ')
-                    || domain.contains(':')
-            })
-        {
-            return Err("invalid_input: domains must contain at most 20 hostnames".to_owned());
-        }
-        if let Some(language) = &params.language
-            && language.trim().is_empty()
-        {
-            return Err("invalid_input: language must not be empty".to_owned());
-        }
-        if let Some(time_range) = &params.time_range
-            && !matches!(time_range.as_str(), "day" | "week" | "month" | "year")
-        {
-            return Err("invalid_input: unsupported time_range".to_owned());
-        }
+        validate_search_filters(
+            &params.domains,
+            params.language.as_ref(),
+            params.time_range.as_ref(),
+        )?;
         let started = std::time::Instant::now();
-        let client =
-            SearchClient::from_config(&self.config).map_err(|error| stable_search_error(&error))?;
-        let provider = client.provider();
+        let timer = observe::Timer::start();
+        let clients = self.search_chain()?;
         let options = SearchOptions {
             language: params
                 .language
@@ -366,11 +473,37 @@ impl McpServer {
                 .map(|value| value.trim().to_owned())
                 .collect(),
         };
-        let results = client
-            .search_with_options(query, &options)
-            .await
-            .map_err(|error| stable_search_error(&error))?;
+        let (results, provider) = match search_with_fallback(
+            &clients,
+            query,
+            &options,
+            SEARCH_ATTEMPTS,
+            self.search_budget(),
+        )
+        .await
+        {
+            Ok(answered) => answered,
+            Err(error) => {
+                let code = stable_search_error(&error);
+                observe::event(
+                    "web_search",
+                    "error",
+                    timer.elapsed(),
+                    &[("code", serde_json::json!(code.split(':').next()))],
+                );
+                return Err(code);
+            }
+        };
         let result_count = results.len();
+        observe::event(
+            "web_search",
+            "ok",
+            timer.elapsed(),
+            &[
+                ("result_count", serde_json::json!(result_count)),
+                ("provider", serde_json::json!(provider)),
+            ],
+        );
         let limit = params.limit as usize;
         Ok(Json(WebSearchResponse {
             query: query.to_owned(),
@@ -394,6 +527,187 @@ impl McpServer {
                 duration_ms: started.elapsed().as_millis(),
             },
         }))
+    }
+
+    #[tool(
+        name = "web_deep_search",
+        description = "Research one question end to end: search several bounded queries, deduplicate and rank sources with explainable signals, and fetch the top pages. Returns sources, never a synthesized answer"
+    )]
+    async fn web_deep_search(
+        &self,
+        Parameters(params): Parameters<WebDeepSearchParams>,
+    ) -> Result<Json<WebDeepSearchResponse>, String> {
+        let query = params.query.trim();
+        if query.is_empty() || query.chars().count() > 500 {
+            return Err("invalid_input: query must be 1-500 characters".to_owned());
+        }
+        if params.variants.len() > 8
+            || params
+                .variants
+                .iter()
+                .any(|variant| variant.chars().count() > 500)
+        {
+            return Err(
+                "invalid_input: at most 8 variants of at most 500 characters are allowed"
+                    .to_owned(),
+            );
+        }
+        if !(1..=5).contains(&params.max_queries)
+            || !(1..=20).contains(&params.max_sources)
+            || params.max_pages > 10
+            || !(1..=100_000).contains(&params.max_chars)
+        {
+            return Err(
+                "invalid_input: max_queries 1-5, max_sources 1-20, max_pages 0-10, max_chars 1-100000"
+                    .to_owned(),
+            );
+        }
+        if params.max_pages > params.max_sources {
+            return Err("invalid_input: max_pages must not exceed max_sources".to_owned());
+        }
+        if !matches!(params.format.as_str(), "full" | "compact") {
+            return Err("invalid_input: format must be \"full\" or \"compact\"".to_owned());
+        }
+        validate_search_filters(
+            &params.domains,
+            params.language.as_ref(),
+            params.time_range.as_ref(),
+        )?;
+        let timer = observe::Timer::start();
+        let started = std::time::Instant::now();
+        let search = self.search_chain()?;
+        let fetch =
+            FetchClient::from_config(&self.config).map_err(|error| stable_fetch_error(&error))?;
+        let robots = RobotsGate::new(fetch.clone());
+        let cache = SqlitePageStore {
+            store: Arc::clone(&self.store),
+            profile: self.status.profile.clone(),
+            ttl_seconds: i64::try_from(self.config.cache_ttl_ms / 1_000).unwrap_or(i64::MAX),
+        };
+        let request = DeepSearchRequest {
+            query: query.to_owned(),
+            variants: params
+                .variants
+                .iter()
+                .map(|variant| variant.trim().to_owned())
+                .collect(),
+            max_queries: params.max_queries,
+            max_sources: params.max_sources,
+            max_pages: params.max_pages,
+            max_chars: params.max_chars,
+            search: SearchOptions {
+                language: params
+                    .language
+                    .as_ref()
+                    .map(|value| value.trim().to_owned()),
+                time_range: params.time_range.clone(),
+                domains: params
+                    .domains
+                    .iter()
+                    .map(|value| value.trim().to_owned())
+                    .collect(),
+            },
+            concurrency: usize::from(self.config.crawl_concurrency),
+            per_host_concurrency: usize::from(self.config.per_host_concurrency),
+            budget: Duration::from_millis(self.config.deep_search_budget_ms),
+            attempts: SEARCH_ATTEMPTS,
+        };
+        let deps = DeepSearchDeps {
+            search: &search,
+            fetch: &fetch,
+            robots: &robots,
+            cache: (self.config.cache_ttl_ms > 0).then_some(&cache as &dyn PageStore),
+        };
+        let bundle = match deep_search(&deps, &request).await {
+            Ok(bundle) => bundle,
+            Err(error) => {
+                let code = stable_search_error(&error);
+                observe::event(
+                    "web_deep_search",
+                    "error",
+                    timer.elapsed(),
+                    &[("code", serde_json::json!(code.split(':').next()))],
+                );
+                return Err(code);
+            }
+        };
+        observe::event(
+            "web_deep_search",
+            "ok",
+            timer.elapsed(),
+            &[
+                ("queries", serde_json::json!(bundle.queries.len())),
+                (
+                    "queries_succeeded",
+                    serde_json::json!(bundle.meta.queries_succeeded),
+                ),
+                ("sources", serde_json::json!(bundle.sources.len())),
+                (
+                    "pages_fetched",
+                    serde_json::json!(bundle.meta.pages_fetched),
+                ),
+                (
+                    "pages_from_cache",
+                    serde_json::json!(bundle.meta.pages_from_cache),
+                ),
+                ("warnings", serde_json::json!(bundle.warnings.len())),
+                (
+                    "budget_exhausted",
+                    serde_json::json!(bundle.meta.budget_exhausted),
+                ),
+            ],
+        );
+        let compact =
+            (params.format == "compact").then(|| render_compact(&bundle, params.max_chars * 4));
+        Ok(Json(WebDeepSearchResponse {
+            query: bundle.query,
+            queries: bundle.queries,
+            sources: if compact.is_some() {
+                Vec::new()
+            } else {
+                bundle.sources
+            },
+            compact,
+            warnings: bundle
+                .warnings
+                .iter()
+                .map(stable_research_warning)
+                .collect(),
+            meta: bundle.meta,
+            duration_ms: started.elapsed().as_millis(),
+        }))
+    }
+
+    /// Search backends in preference order.
+    ///
+    /// A configured instance stays first; the keyless backend is appended so that one blocked or
+    /// unreachable instance degrades result quality instead of removing search.
+    fn search_chain(&self) -> Result<Vec<SearchClient>, String> {
+        let primary =
+            SearchClient::from_config(&self.config).map_err(|error| stable_search_error(&error))?;
+        let mut chain = vec![primary];
+        if self.config.searxng_url.is_some()
+            && let Ok(builtin) = SearchClient::builtin(
+                Duration::from_millis(self.config.timeout_ms),
+                self.config.max_bytes,
+                self.config.max_results,
+            )
+        {
+            chain.push(builtin);
+        }
+        Ok(chain)
+    }
+
+    /// Wall-clock ceiling for one search, covering every retry and fallback backend.
+    ///
+    /// Each attempt already carries the configured request timeout, so the ceiling is that
+    /// timeout multiplied by the attempt count rather than a second unrelated knob.
+    fn search_budget(&self) -> Duration {
+        Duration::from_millis(
+            self.config
+                .timeout_ms
+                .saturating_mul(SEARCH_ATTEMPTS as u64),
+        )
     }
 
     #[tool(
@@ -770,6 +1084,60 @@ impl McpServer {
     }
 }
 
+/// Validate the filters shared by every search-backed tool.
+///
+/// Both `web_search` and `web_deep_search` forward these values to the same backend, so the
+/// bounds live in one place rather than being restated per tool.
+fn validate_search_filters(
+    domains: &[String],
+    language: Option<&String>,
+    time_range: Option<&String>,
+) -> Result<(), String> {
+    if domains.len() > 20
+        || domains.iter().any(|domain| {
+            domain.trim().is_empty()
+                || domain.contains('/')
+                || domain.contains(' ')
+                || domain.contains(':')
+        })
+    {
+        return Err("invalid_input: domains must contain at most 20 hostnames".to_owned());
+    }
+    if language.is_some_and(|language| language.trim().is_empty()) {
+        return Err("invalid_input: language must not be empty".to_owned());
+    }
+    if time_range.is_some_and(|value| !matches!(value.as_str(), "day" | "week" | "month" | "year"))
+    {
+        return Err("invalid_input: unsupported time_range".to_owned());
+    }
+    Ok(())
+}
+
+fn stable_research_warning(warning: &ResearchWarning) -> String {
+    match warning {
+        ResearchWarning::QueryFailed { query, error } => {
+            format!("query_failed: {query}: {}", stable_search_error(error))
+        }
+        ResearchWarning::PageFailed { url, error } => {
+            format!("page_failed: {url}: {}", stable_fetch_error(error))
+        }
+        ResearchWarning::PageNotExtractable { url, .. } => {
+            format!("page_not_extractable: {url}: unsupported_content_type")
+        }
+        ResearchWarning::RobotsDisallowed { url } => {
+            format!("robots_disallowed: {url}")
+        }
+        ResearchWarning::RobotsUnavailable { url } => {
+            format!(
+                "robots_unavailable: {url}: rules could not be read, so the page was not fetched"
+            )
+        }
+        ResearchWarning::BudgetExhausted { stage } => {
+            format!("budget_exhausted: {stage} stopped at the configured wall-clock limit")
+        }
+    }
+}
+
 fn stable_crawl_error(error: &CrawlError) -> String {
     match error {
         CrawlError::NotFound(_) => "job_not_found: crawl job does not exist".to_owned(),
@@ -853,6 +1221,8 @@ mod tests {
             max_bytes: 3_000_000,
             crawl_concurrency: 8,
             per_host_concurrency: 3,
+            cache_ttl_ms: 900_000,
+            deep_search_budget_ms: 60_000,
             browser: crate::config::BrowserMode::Disabled,
             spool_root: std::path::PathBuf::from("/tmp/websift-spool"),
             worker_program: std::path::PathBuf::from("node"),
@@ -941,7 +1311,11 @@ mod tests {
         assert!(tools.iter().any(|tool| tool.name == "websift_status"));
         assert!(tools.iter().any(|tool| tool.name == "web_search"));
         assert!(tools.iter().any(|tool| tool.name == "web_scrape"));
-        for tool in tools.iter().filter(|tool| tool.name == "web_search") {
+        assert!(tools.iter().any(|tool| tool.name == "web_deep_search"));
+        for tool in tools
+            .iter()
+            .filter(|tool| tool.name == "web_search" || tool.name == "web_deep_search")
+        {
             assert_eq!(
                 tool.input_schema.get("additionalProperties"),
                 Some(&serde_json::Value::Bool(false))
@@ -986,6 +1360,66 @@ mod tests {
         assert_eq!(scrape_rejected.is_error, Some(true));
     }
 
+    fn deep_search_params(query: &str) -> super::WebDeepSearchParams {
+        super::WebDeepSearchParams {
+            query: query.to_owned(),
+            variants: Vec::new(),
+            max_queries: 3,
+            max_sources: 5,
+            max_pages: 2,
+            max_chars: 5_000,
+            language: None,
+            time_range: None,
+            domains: Vec::new(),
+            format: "full".to_owned(),
+        }
+    }
+
+    #[tokio::test]
+    async fn deep_search_rejects_out_of_bound_requests_before_any_network_call() {
+        let server = McpServer::new("codex").expect("valid profile");
+        let empty = server
+            .web_deep_search(rmcp::handler::server::wrapper::Parameters(
+                deep_search_params("   "),
+            ))
+            .await;
+        assert_eq!(
+            empty.err().unwrap(),
+            "invalid_input: query must be 1-500 characters"
+        );
+
+        let mut too_many_pages = deep_search_params("rust mcp");
+        too_many_pages.max_pages = 4;
+        too_many_pages.max_sources = 2;
+        let rejected = server
+            .web_deep_search(rmcp::handler::server::wrapper::Parameters(too_many_pages))
+            .await;
+        assert_eq!(
+            rejected.err().unwrap(),
+            "invalid_input: max_pages must not exceed max_sources"
+        );
+
+        let mut bad_format = deep_search_params("rust mcp");
+        bad_format.format = "markdown".to_owned();
+        let rejected = server
+            .web_deep_search(rmcp::handler::server::wrapper::Parameters(bad_format))
+            .await;
+        assert_eq!(
+            rejected.err().unwrap(),
+            "invalid_input: format must be \"full\" or \"compact\""
+        );
+
+        let mut bad_domain = deep_search_params("rust mcp");
+        bad_domain.domains = vec!["https://example.com/path".to_owned()];
+        let rejected = server
+            .web_deep_search(rmcp::handler::server::wrapper::Parameters(bad_domain))
+            .await;
+        assert_eq!(
+            rejected.err().unwrap(),
+            "invalid_input: domains must contain at most 20 hostnames"
+        );
+    }
+
     #[tokio::test]
     async fn initializes_lists_and_calls_status_tool() {
         let (server_transport, client_transport) = tokio::io::duplex(8 * 1024);
@@ -999,7 +1433,7 @@ mod tests {
         let implementation = server_info.server_info.as_ref().expect("server identity");
         assert_eq!(implementation.name, "websift");
         assert_eq!(implementation.version, env!("CARGO_PKG_VERSION"));
-        assert_eq!(tools.len(), 8);
+        assert_eq!(tools.len(), 9);
         assert_tool_schemas(&tools);
         assert_status_calls(&client).await;
         client.cancel().await.expect("client cancels");

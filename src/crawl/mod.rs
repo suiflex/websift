@@ -1,11 +1,8 @@
 //! Bounded URL discovery primitives.
 
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
-    future::Future,
-    pin::Pin,
+    collections::{BTreeSet, HashSet},
     sync::atomic::{AtomicU64, Ordering},
-    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -16,17 +13,9 @@ use crate::{
         FetchClient,
         extract::{self, ExtractionOptions},
     },
-    policy::{RobotsCache, RobotsRules},
+    robots::{RobotsDecision, RobotsGate, origin_key},
     storage::{StorageError, Store},
 };
-
-const ROBOTS_USER_AGENT: &str = "websift";
-const ROBOTS_MAX_BYTES: usize = 512 * 1024;
-const ROBOTS_CACHE_TTL: Duration = Duration::from_secs(300);
-const ROBOTS_CACHE_ENTRIES: usize = 256;
-
-type RobotsFetchFuture = Pin<Box<dyn Future<Output = Result<String, ()>> + Send>>;
-type RobotsFetcher = Arc<dyn Fn(String) -> RobotsFetchFuture + Send + Sync>;
 
 const MAX_URL_CHARS: usize = 2_048;
 static NEXT_JOB_ID: AtomicU64 = AtomicU64::new(1);
@@ -96,45 +85,33 @@ pub struct CrawlService<'a> {
     store: &'a Store,
     fetch: FetchClient,
     profile: String,
-    robots: Arc<Mutex<RobotsCache>>,
-    robots_fetcher: RobotsFetcher,
-    robots_unavailable: Mutex<HashSet<String>>,
-    next_host_request: Mutex<HashMap<String, Instant>>,
+    robots: RobotsGate,
 }
 
 #[allow(clippy::missing_errors_doc)]
 impl<'a> CrawlService<'a> {
     pub fn new(store: &'a Store, fetch: FetchClient, profile: impl Into<String>) -> Self {
-        let robots_fetcher: RobotsFetcher = Arc::new({
-            let fetch = fetch.clone();
-            move |url| {
-                let fetch = fetch.clone();
-                Box::pin(async move {
-                    let result = fetch.get(&url).await.map_err(|_| ())?;
-                    String::from_utf8(result.body).map_err(|_| ())
-                })
-            }
-        });
-        Self::with_robots_fetcher(store, fetch, profile, robots_fetcher)
+        let robots = RobotsGate::new(fetch.clone());
+        Self {
+            store,
+            fetch,
+            profile: profile.into(),
+            robots,
+        }
     }
 
+    #[cfg(test)]
     fn with_robots_fetcher(
         store: &'a Store,
         fetch: FetchClient,
         profile: impl Into<String>,
-        robots_fetcher: RobotsFetcher,
+        robots_fetcher: crate::robots::RobotsFetcher,
     ) -> Self {
         Self {
             store,
             fetch,
             profile: profile.into(),
-            robots: Arc::new(Mutex::new(RobotsCache::new(
-                ROBOTS_CACHE_TTL,
-                ROBOTS_CACHE_ENTRIES,
-            ))),
-            robots_fetcher,
-            robots_unavailable: Mutex::new(HashSet::new()),
-            next_host_request: Mutex::new(HashMap::new()),
+            robots: RobotsGate::with_fetcher(robots_fetcher),
         }
     }
 
@@ -254,24 +231,26 @@ impl<'a> CrawlService<'a> {
             let Some(origin) = origin_key(&url_parsed) else {
                 continue;
             };
-            let Ok(robots) = self.robots_for(&origin).await else {
-                let _ = self.store.crawl_urls(&self.profile).set_state(
-                    &url_id,
-                    "failed",
-                    Some("robots_unavailable"),
-                );
-                continue;
+            let delay = match self.robots.check(&url_parsed).await {
+                RobotsDecision::Allowed { delay } => delay,
+                RobotsDecision::Disallowed => {
+                    let _ = self.store.crawl_urls(&self.profile).set_state(
+                        &url_id,
+                        "failed",
+                        Some("robots_disallowed"),
+                    );
+                    continue;
+                }
+                RobotsDecision::Unavailable => {
+                    let _ = self.store.crawl_urls(&self.profile).set_state(
+                        &url_id,
+                        "failed",
+                        Some("robots_unavailable"),
+                    );
+                    continue;
+                }
             };
-            if !robots.allowed(&path_and_query(&url_parsed), ROBOTS_USER_AGENT) {
-                let _ = self.store.crawl_urls(&self.profile).set_state(
-                    &url_id,
-                    "failed",
-                    Some("robots_disallowed"),
-                );
-                continue;
-            }
-            self.wait_for_host(&origin, robots.crawl_delay(ROBOTS_USER_AGENT))
-                .await;
+            self.robots.wait_for_host(&origin, delay).await;
             let Ok(fetched) = self.fetch.get(&url).await else {
                 let _ = self.store.crawl_urls(&self.profile).set_state(
                     &url_id,
@@ -362,69 +341,6 @@ impl<'a> CrawlService<'a> {
             queue.push((next_id, next, depth + 1));
         }
     }
-
-    async fn robots_for(&self, origin: &str) -> Result<RobotsRules, ()> {
-        if let Some(rules) = self.robots.lock().map_err(|_| ())?.get(origin).cloned() {
-            return Ok(rules);
-        }
-        if self
-            .robots_unavailable
-            .lock()
-            .map_err(|_| ())?
-            .contains(origin)
-        {
-            return Err(());
-        }
-        let robots_url = format!("{origin}/robots.txt");
-        let Ok(document) = (self.robots_fetcher)(robots_url).await else {
-            self.robots_unavailable
-                .lock()
-                .map_err(|_| ())?
-                .insert(origin.to_owned());
-            return Err(());
-        };
-        let rules = RobotsRules::parse(&document, ROBOTS_MAX_BYTES);
-        self.robots
-            .lock()
-            .map_err(|_| ())?
-            .insert(origin.to_owned(), rules.clone());
-        Ok(rules)
-    }
-
-    async fn wait_for_host(&self, origin: &str, delay: Option<Duration>) {
-        let Some(delay) = delay.filter(|value| !value.is_zero()) else {
-            return;
-        };
-        let wait = {
-            let mut schedule = self.next_host_request.lock().expect("host schedule lock");
-            let now = Instant::now();
-            let at = schedule.get(origin).copied().unwrap_or(now);
-            let wait = at.saturating_duration_since(now);
-            schedule.insert(origin.to_owned(), now + wait + delay);
-            wait
-        };
-        if !wait.is_zero() {
-            tokio::time::sleep(wait).await;
-        }
-    }
-}
-
-fn origin_key(url: &Url) -> Option<String> {
-    Some(format!(
-        "{}://{}{}",
-        url.scheme(),
-        url.host_str()?,
-        url.port().map_or(String::new(), |p| format!(":{p}"))
-    ))
-}
-
-fn path_and_query(url: &Url) -> String {
-    let mut value = url.path().to_owned();
-    if let Some(query) = url.query() {
-        value.push('?');
-        value.push_str(query);
-    }
-    value
 }
 
 fn parse_state(value: &str) -> CrawlState {
@@ -610,10 +526,9 @@ fn path_matches(path: &str, glob: &str) -> bool {
 mod tests {
     use std::time::Duration;
 
-    use super::{
-        CrawlBudgets, CrawlRequest, CrawlService, CrawlState, MapOptions, ROBOTS_USER_AGENT,
-        RobotsFetcher, map_documents,
-    };
+    use super::{CrawlBudgets, CrawlRequest, CrawlService, CrawlState, MapOptions, map_documents};
+    use crate::robots::ROBOTS_USER_AGENT;
+    use crate::robots::RobotsFetcher;
     use crate::{fetch::FetchClient, storage::Store};
 
     #[test]
@@ -659,7 +574,11 @@ mod tests {
             Box::pin(async { Ok("User-agent: websift\nDisallow: /private\nAllow: /".to_owned()) })
         });
         let service = CrawlService::with_robots_fetcher(&store, fetch, "test", robots_fetcher);
-        let rules = service.robots_for("https://example.com").await.unwrap();
+        let rules = service
+            .robots
+            .rules_for("https://example.com")
+            .await
+            .unwrap();
         assert!(!rules.allowed("/private", ROBOTS_USER_AGENT));
         assert!(rules.allowed("/public", ROBOTS_USER_AGENT));
     }
