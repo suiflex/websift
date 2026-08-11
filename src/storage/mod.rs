@@ -92,14 +92,12 @@ impl Store {
         database_path: Option<std::path::PathBuf>,
         shared_memory_uri: Option<String>,
     ) -> Result<Self> {
-        // busy_timeout comes first. Switching the journal to WAL needs a brief exclusive lock, so
-        // with the timeout set afterwards a second process starting at the same moment fails
-        // immediately with "database is locked" instead of waiting the way every later statement
-        // does.
-        connection.execute_batch(
-            "PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;",
-        )?;
-        apply_migrations(&connection)?;
+        // The busy handler is installed through the API before any statement runs, so every later
+        // lock wait honors it.
+        connection.busy_timeout(BUSY_TIMEOUT)?;
+        connection.execute_batch("PRAGMA foreign_keys = ON;")?;
+        enable_wal(&connection)?;
+        retry_while_busy(|| apply_migrations(&connection))?;
         Ok(Self {
             connection,
             database_path,
@@ -146,6 +144,58 @@ impl Store {
             profile: profile.to_owned(),
         }
     }
+}
+
+const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+/// Attempts for operations `SQLite` may refuse outright rather than route to the busy handler.
+const BUSY_ATTEMPTS: u32 = 25;
+
+fn is_busy(error: &StorageError) -> bool {
+    matches!(
+        error,
+        StorageError::Sqlite(rusqlite::Error::SqliteFailure(failure, _))
+            if matches!(
+                failure.code,
+                rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+            )
+    )
+}
+
+/// Retry an operation that `SQLite` refused because another connection held a lock.
+///
+/// `SQLite` does not always route a conflict to the busy handler: a lock upgrade that could
+/// deadlock is refused immediately. Opening a database is exactly when several processes collide,
+/// and waiting is always better than failing to start.
+fn retry_while_busy<T>(mut operation: impl FnMut() -> Result<T>) -> Result<T> {
+    let mut last = operation();
+    for attempt in 1..BUSY_ATTEMPTS {
+        match &last {
+            Err(error) if is_busy(error) => {}
+            _ => return last,
+        }
+        std::thread::sleep(std::time::Duration::from_millis(u64::from(attempt) * 10));
+        last = operation();
+    }
+    last
+}
+
+/// Put the database in `WAL` mode, tolerating a concurrent opener doing the same.
+///
+/// Reading the current mode takes no exclusive lock, so a process that finds WAL already set does
+/// no work at all; only the first one has to switch it.
+fn enable_wal(connection: &Connection) -> Result<()> {
+    retry_while_busy(|| {
+        let current: String = connection.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
+        if current.eq_ignore_ascii_case("wal") {
+            return Ok(());
+        }
+        connection
+            .query_row("PRAGMA journal_mode = WAL", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .map(|_| ())
+            .map_err(StorageError::from)
+    })
 }
 
 /// Apply pending migrations exactly once, even when several processes open the same database.
