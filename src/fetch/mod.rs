@@ -113,6 +113,30 @@ impl FetchClient {
         })
     }
 
+    /// Build a client whose DNS is overridden, for loopback tests only.
+    ///
+    /// This is the one seam that lets tests exercise real HTTP without relaxing URL policy, and
+    /// it exists only in test builds.
+    #[cfg(test)]
+    pub(crate) fn with_dns_override<R: reqwest::dns::Resolve + 'static>(
+        timeout: Duration,
+        max_bytes: u64,
+        resolver: Arc<R>,
+    ) -> Result<Self, FetchError> {
+        let client = Client::builder()
+            .dns_resolver(resolver)
+            .connect_timeout(timeout)
+            .timeout(timeout)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(fetch_transport_error)?;
+        Ok(Self {
+            client,
+            timeout,
+            max_bytes,
+        })
+    }
+
     /// Fetch a public HTTP(S) URL using GET.
     ///
     /// The URL is validated before any network operation. The body is streamed and

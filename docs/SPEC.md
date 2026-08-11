@@ -109,6 +109,9 @@ Configuration is environment-first so the same binary works under MCP launchers 
 | `WEBSIFT_MAX_BYTES` | `2000000` | Maximum compressed or decoded response bytes, whichever limit is reached first |
 | `WEBSIFT_CRAWL_CONCURRENCY` | `4` | Global page-worker limit; hard ceiling `32` |
 | `WEBSIFT_PER_HOST_CONCURRENCY` | `2` | Per-host request limit |
+| `WEBSIFT_CACHE_TTL_MS` | `900000` | Page-cache lifetime for `web_deep_search` fetches; `0` disables the cache |
+| `WEBSIFT_DEEP_SEARCH_BUDGET_MS` | `60000` | Wall-clock ceiling for one `web_deep_search` operation; range `1000`-`600000` |
+| `WEBSIFT_LOG` | `json` | `off` silences structured stderr events |
 | `WEBSIFT_BROWSER` | `auto` | `auto`, `enabled`, or `disabled` browser-worker policy |
 | `WEBSIFT_DATA_DIR` | platform data directory | Advanced override for automatically managed state and artifacts |
 | `WEBSIFT_PROFILE` | `default` | Local visibility namespace; client installers set `codex`, `claude-code`, `hermes`, or `openclaw` |
@@ -174,6 +177,8 @@ Output:
 
 Results are deduplicated by normalized final URL while preserving provider order. `rank` is positional, not a universal relevance probability. `source` and `provider` name the backend that actually served the request: `duckduckgo` for the built-in backend, `searxng` when an instance is configured. A backend response that cannot be parsed is reported as `provider_unavailable` instead of an empty result list.
 
+`web_search` and `web_deep_search` share one resilient search path. A transient, rate-limited, or blocked response is retried up to three attempts with exponential backoff from 250ms, and a configured SearXNG instance falls back to the built-in backend rather than failing the call. The whole call, including every retry and fallback, is bounded by `WEBSIFT_TIMEOUT` multiplied by the attempt count. Because a fallback can change which backend answers, `source` and `provider` report the backend that actually produced the results, not the configured preference. Failures that are decisions rather than accidents — invalid configuration, an oversized response — are never retried.
+
 ### `web_scrape`
 
 Input:
@@ -232,6 +237,68 @@ Discovers URLs from the start page, sitemap indexes, sitemaps, and optionally bo
   "use_sitemap": true
 }
 ```
+
+### `web_deep_search`
+
+Runs the deterministic research bundle described in section 10 as one call: plan queries, search
+them concurrently, deduplicate URLs, rank with explainable signals, and fetch the top ranked
+pages. It returns sources, never a synthesized answer, and never calls a model.
+
+```json
+{
+  "query": "how does the MCP stdio transport frame messages",
+  "variants": ["mcp stdio jsonrpc framing"],
+  "max_queries": 3,
+  "max_sources": 8,
+  "max_pages": 5,
+  "max_chars": 5000,
+  "language": "en-us",
+  "time_range": "year",
+  "domains": ["modelcontextprotocol.io"],
+  "format": "full"
+}
+```
+
+`variants` are caller-written; no variant is generated from the question. `domains` both scopes
+the backend query and supplies the preferred-domain ranking signal. Bounds: `max_queries` 1-5,
+`max_sources` 1-20, `max_pages` 0-10 and never above `max_sources`, `max_chars` 1-100000, at most
+8 variants of at most 500 characters.
+
+`format` selects the response shape. `full` returns ranked sources with signals, hashes, and
+per-source content. `compact` returns `compact`, a numbered block per source carrying its title,
+URL, and body, bounded at `max_chars * 4` characters, with `sources` left empty; callers with a
+tight context window use it to spend fewer tokens without losing citations.
+
+Production behavior applied to every call:
+
+- **Backend fallback.** When a SearXNG instance is configured it is tried first; a transient,
+  rate-limited, or blocked response falls back to the built-in backend rather than failing.
+- **Retries.** Transient search and fetch failures are retried up to three attempts with
+  exponential backoff from 250ms. Validation, size, and media-type failures are decisions, not
+  accidents, and are never retried.
+- **Wall-clock budget.** `WEBSIFT_DEEP_SEARCH_BUDGET_MS` bounds the whole operation, not one
+  request. When it runs out, retrieval stops and the bundle reports `budget_exhausted`.
+- **Robots.** Every page fetch passes the same robots gate as crawling, including the crawl delay.
+  A disallowed or unreadable origin produces a warning and leaves the source with its snippet.
+- **Concurrency.** `WEBSIFT_CRAWL_CONCURRENCY` bounds fetches globally and
+  `WEBSIFT_PER_HOST_CONCURRENCY` bounds them per host.
+- **Cache.** Extractions are cached in profile-scoped SQLite, keyed by URL and extraction bound,
+  for `WEBSIFT_CACHE_TTL_MS`. Cached sources report `content_source: "cache"`, and expired rows
+  are purged on write.
+- **Duplicates.** Sources whose fetched bytes hash identically to a higher ranked source keep
+  their citation, drop the repeated body, and report `duplicate_of`.
+- **Sanitization.** Titles, snippets, and Markdown are stripped of control characters and bounded
+  before they leave the process, because backend and page text is untrusted data.
+
+Each source carries `rank`, `provider_rank`, `score`, and a `signals` object holding
+`provider_rank`, `term_coverage`, `query_agreement`, `preferred_domain`, and
+`host_repeat_penalty`, so any ordering can be explained without rerunning the operation. Fetched
+sources also carry `content`, `content_hash`, and `truncated`.
+
+A failed query or unfetchable page becomes a `warnings` entry rather than a failed call. Warning
+prefixes are `query_failed`, `page_failed`, `page_not_extractable`, `robots_disallowed`,
+`robots_unavailable`, and `budget_exhausted`. The call fails only when every planned query failed
+on every backend, which returns the underlying search error code.
 
 ### Crawl job tools
 
@@ -364,7 +431,11 @@ The crawler supports outbound proxy configuration for legitimate deployment/netw
 | Link and XML sitemap mapping | required | implemented; broader discovery remains |
 | `web_search` with zero configuration through the built-in backend | required | implemented; live backend behavior not yet measured |
 | `web_search` through configured SearXNG | required | implemented |
+| Shared retry, backoff, and backend fallback for every search-backed tool | required | implemented; covered by loopback end-to-end tests |
 | `web_scrape` HTTP and worker extraction modes | required | implemented; render modes unavailable |
+| `web_deep_search` deterministic research bundle | required | implemented; freshness signal absent because no backend returns publication dates |
+| `web_deep_search` retries, backend fallback, wall-clock budget, robots gate, per-host limits | required | implemented; end-to-end tested against loopback servers, not yet measured against a live corpus |
+| `web_deep_search` durable page cache and duplicate suppression | required | implemented and end-to-end tested; duplicate detection is exact-hash only |
 | Async crawl jobs, status, pagination, cancel | required | implemented |
 | Robots checks and background crawl execution | required | implemented |
 | Durable SQLite job state | required | implemented; full resume semantics remain |
@@ -397,21 +468,25 @@ Minimum release gates:
 
 ## 10. Phase 2 research behavior
 
-`deep_search` remains deterministic and bounded:
+`deep_search` is implemented as the `web_deep_search` tool and remains deterministic and bounded:
 
 1. Accept one question plus explicit `max_queries`, `max_sources`, and `max_pages` ceilings.
-2. Produce simple query variants from caller-supplied variants or documented syntax rules; no hidden LLM call.
-3. Search with bounded concurrency.
-4. Normalize and deduplicate URLs.
-5. Fetch only the highest provider-ranked candidates within budget.
-6. Rank with explainable signals: provider rank, exact term coverage, freshness when known, preferred-domain match, and duplicate penalty.
+2. Plan queries as the question followed by caller-supplied variants, deduplicated case-insensitively; no variant is generated and no LLM is called.
+3. Search with bounded concurrency, then restore planned query order so that concurrency cannot change ranking.
+4. Normalize and deduplicate URLs, keeping the best provider rank and the number of queries that agreed on each URL.
+5. Rank with explainable signals: provider rank (weight 0.40), exact term coverage (0.35), query agreement (0.15), preferred-domain match (0.10), and a 0.15-per-repeat same-host penalty capped at three repeats, which demotes duplicates without banning a host. Freshness is specified but not implemented, because neither backend returns a publication date and inferring one from URL text would be a guess.
+6. Fetch only the highest ranked candidates within budget and extract bounded Markdown.
 7. Return a source bundle with per-item provenance and warnings; do not synthesize an answer.
 
 `confidence` is deliberately omitted until an evaluation dataset can show that it is calibrated. Source-type weights are configuration ideas, not facts, and are also deferred until measured against retrieval quality.
 
 ## 11. Observability and privacy
 
-Default logs contain operation, duration, status, byte count, and result count. Full queries, page content, and URL query strings are not logged by default because they may contain sensitive data.
+Default logs contain operation, duration, status, and counters, emitted as one JSON object per
+event on stderr because stdout carries the MCP protocol. `web_deep_search` reports
+`queries`, `queries_succeeded`, `sources`, `pages_fetched`, `pages_from_cache`, `warnings`, and
+`budget_exhausted`. Full queries, page content, and URL query strings are not logged because they
+may contain sensitive data. `WEBSIFT_LOG=off` silences events entirely.
 
 No telemetry is sent externally in v1. A request ID may be generated locally and returned in errors for correlation.
 

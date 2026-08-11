@@ -16,10 +16,16 @@ static NEXT_MEMORY_DB: AtomicU64 = AtomicU64::new(1);
 use rusqlite::{Connection, OptionalExtension, params};
 use thiserror::Error;
 
-const MIGRATIONS: &[(&str, &str)] = &[(
-    "0001_initial.sql",
-    include_str!("../../migrations/0001_initial.sql"),
-)];
+const MIGRATIONS: &[(&str, &str)] = &[
+    (
+        "0001_initial.sql",
+        include_str!("../../migrations/0001_initial.sql"),
+    ),
+    (
+        "0002_page_cache.sql",
+        include_str!("../../migrations/0002_page_cache.sql"),
+    ),
+];
 
 #[derive(Debug, Error)]
 pub enum StorageError {
@@ -120,6 +126,12 @@ impl Store {
     }
     pub fn documents(&self, profile: &str) -> Documents<'_> {
         Documents {
+            connection: &self.connection,
+            profile: profile.to_owned(),
+        }
+    }
+    pub fn page_cache(&self, profile: &str) -> PageCache<'_> {
+        PageCache {
             connection: &self.connection,
             profile: profile.to_owned(),
         }
@@ -300,6 +312,86 @@ impl Documents<'_> {
     }
 }
 
+/// One cached extraction of a fetched page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CachedPage {
+    pub final_url: String,
+    pub title: Option<String>,
+    pub markdown: String,
+    pub content_hash: String,
+    pub truncated: bool,
+    /// Unix seconds when the page was fetched.
+    pub fetched_at: i64,
+}
+
+/// Profile-scoped page cache with caller-supplied expiry.
+///
+/// Time is passed in rather than read here so that expiry is testable and so that one operation
+/// evaluates every entry against a single clock reading.
+pub struct PageCache<'a> {
+    connection: &'a Connection,
+    profile: String,
+}
+
+impl PageCache<'_> {
+    /// Read a fresh entry, treating anything older than `ttl_seconds` as absent.
+    pub fn get(
+        &self,
+        url: &str,
+        max_chars: usize,
+        now: i64,
+        ttl_seconds: i64,
+    ) -> Result<Option<CachedPage>> {
+        if ttl_seconds <= 0 {
+            return Ok(None);
+        }
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT final_url, title, markdown, content_hash, truncated, fetched_at FROM page_cache WHERE profile = ?1 AND url = ?2 AND max_chars = ?3 AND fetched_at >= ?4",
+                params![self.profile, url, max_chars as i64, now - ttl_seconds],
+                |row| {
+                    Ok(CachedPage {
+                        final_url: row.get(0)?,
+                        title: row.get(1)?,
+                        markdown: row.get(2)?,
+                        content_hash: row.get(3)?,
+                        truncated: row.get::<_, i64>(4)? != 0,
+                        fetched_at: row.get(5)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    /// Insert or refresh one entry.
+    pub fn put(&self, url: &str, max_chars: usize, page: &CachedPage) -> Result<()> {
+        self.connection.execute(
+            "INSERT INTO page_cache (profile, url, max_chars, final_url, title, markdown, content_hash, truncated, fetched_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) ON CONFLICT(profile, url, max_chars) DO UPDATE SET final_url = excluded.final_url, title = excluded.title, markdown = excluded.markdown, content_hash = excluded.content_hash, truncated = excluded.truncated, fetched_at = excluded.fetched_at",
+            params![
+                self.profile,
+                url,
+                max_chars as i64,
+                page.final_url,
+                page.title,
+                page.markdown,
+                page.content_hash,
+                i64::from(page.truncated),
+                page.fetched_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Delete entries older than the TTL so the database does not grow without bound.
+    pub fn purge_expired(&self, now: i64, ttl_seconds: i64) -> Result<usize> {
+        Ok(self.connection.execute(
+            "DELETE FROM page_cache WHERE profile = ?1 AND fetched_at < ?2",
+            params![self.profile, now - ttl_seconds.max(0)],
+        )?)
+    }
+}
+
 pub struct Artifacts<'a> {
     connection: &'a Connection,
     profile: String,
@@ -371,6 +463,85 @@ mod tests {
         );
         assert_eq!(store.crawl_urls("alpha").count_for_job("job").unwrap(), 1);
         assert_eq!(store.documents("beta").count_for_job("job").unwrap(), 0);
+    }
+
+    #[test]
+    fn page_cache_expires_refreshes_and_scopes_by_profile_and_bound() {
+        let store = Store::open_in_memory().unwrap();
+        let page = super::CachedPage {
+            final_url: "https://example.test/a".to_owned(),
+            title: Some("A".to_owned()),
+            markdown: "body".to_owned(),
+            content_hash: "sha256:abc".to_owned(),
+            truncated: false,
+            fetched_at: 1_000,
+        };
+        store
+            .page_cache("alpha")
+            .put("https://example.test/a", 500, &page)
+            .unwrap();
+
+        let cache = store.page_cache("alpha");
+        assert_eq!(
+            cache
+                .get("https://example.test/a", 500, 1_100, 300)
+                .unwrap()
+                .unwrap()
+                .markdown,
+            "body"
+        );
+        // Past the TTL the entry is absent rather than stale.
+        assert!(
+            cache
+                .get("https://example.test/a", 500, 2_000, 300)
+                .unwrap()
+                .is_none()
+        );
+        // A different extraction bound is a different entry, and a different profile sees nothing.
+        assert!(
+            cache
+                .get("https://example.test/a", 800, 1_100, 300)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            store
+                .page_cache("beta")
+                .get("https://example.test/a", 500, 1_100, 300)
+                .unwrap()
+                .is_none()
+        );
+        // A zero TTL disables reads entirely instead of returning every stored row.
+        assert!(
+            cache
+                .get("https://example.test/a", 500, 1_100, 0)
+                .unwrap()
+                .is_none()
+        );
+
+        let refreshed = super::CachedPage {
+            markdown: "newer".to_owned(),
+            fetched_at: 2_000,
+            ..page
+        };
+        cache
+            .put("https://example.test/a", 500, &refreshed)
+            .unwrap();
+        assert_eq!(
+            cache
+                .get("https://example.test/a", 500, 2_100, 300)
+                .unwrap()
+                .unwrap()
+                .markdown,
+            "newer"
+        );
+        assert_eq!(cache.purge_expired(3_000, 300).unwrap(), 1);
+        assert!(
+            cache
+                .get("https://example.test/a", 500, 2_100, 300)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
