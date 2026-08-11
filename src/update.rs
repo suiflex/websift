@@ -340,6 +340,16 @@ pub fn replace_executable(destination: &Path, binary: &[u8]) -> Result<(), Updat
 }
 
 fn stage_into_place(staged: &Path, destination: &Path) -> Result<(), UpdateError> {
+    // An update may only replace a regular file. Without this check Windows would happily rename
+    // a directory standing at the destination out of the way and install the binary in its place,
+    // which silently moves whatever the user had there.
+    if destination.exists() && !destination.is_file() {
+        return Err(UpdateError::Replace(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "update destination is not a regular file",
+        )));
+    }
+
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -426,7 +436,9 @@ mod tests {
         let directory =
             std::env::temp_dir().join(format!("websift-test-fail-{}", std::process::id()));
         std::fs::create_dir_all(&directory).unwrap();
-        // Renaming onto a directory fails, standing in for any failure after staging.
+        // A directory at the destination is refused on every platform, standing in for any
+        // failure after staging. Renaming onto a directory fails on Unix anyway, but Windows
+        // would rename that directory aside, so the guard is what makes this uniform.
         let destination = directory.join("occupied");
         std::fs::create_dir_all(&destination).unwrap();
 
