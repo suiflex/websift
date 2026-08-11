@@ -89,15 +89,7 @@ actually loaded.
 **Done when.** Both commands include the effective values, and `doctor` notes when the cache is
 disabled.
 
-## 9. Version bump and changelog
-
-**Gap.** `Cargo.toml` still reads `0.1.1` while the tool surface went from 8 to 9 tools and gained
-new environment variables. There is no changelog, and the installers pull released binaries.
-
-**Done when.** The version is bumped, a `CHANGELOG.md` records the tool and configuration changes,
-and the release notes name the new environment variables.
-
-## 10. Live retrieval verification
+## 9. Live retrieval verification
 
 **Gap.** Everything is verified against loopback servers and unit tests. No run against the real
 public web has succeeded in the development environment used so far, because outbound TLS is
@@ -119,6 +111,8 @@ manually invoked test that is skipped by default so continuous integration stays
   sanitization, structured stderr events, and a compact output format.
 - **Shared resilient search path.** `web_search` and `web_deep_search` use one implementation, and
   both report the backend that actually answered rather than the configured preference.
+- **Version bump and changelog.** Released as `0.2.0`; `CHANGELOG.md` records the tool surface and
+  configuration changes.
 - **End-to-end tests.** Eight loopback tests cover the assembled pipeline: happy path, backend
   fallback, transient retry, cache hit, robots denial, mirror deduplication, per-host concurrency,
   and total backend failure. The loopback DNS seam is compiled only under `cfg(test)`, so no

@@ -47,6 +47,7 @@ cargo run -- mcp --profile codex
 - [Architecture](docs/ARCHITECTURE.md)
 - [Installation and distribution](docs/INSTALLATION.md)
 - [Backlog](docs/BACKLOG.md)
+- [Changelog](CHANGELOG.md)
 
 ## Development checks
 
