@@ -1,4 +1,8 @@
-# Websift — web retrieval for AI agents
+<p align="center">
+  <img src="./assets/websift-logo.png" alt="Websift logo" width="240">
+</p>
+
+<h1 align="center">Websift — web retrieval for AI agents</h1>
 
 <p align="center">
   <strong>Search, research, scrape, map, and crawl the public web.<br>One Rust binary, no API key, no model calls in the core.</strong>
