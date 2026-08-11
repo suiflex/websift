@@ -62,8 +62,20 @@ pub enum UpdateError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateStatus {
     pub current: String,
-    pub latest: String,
+    /// Release tag exactly as published, which is what the download URLs use.
+    pub latest_tag: String,
     pub available: bool,
+}
+
+impl UpdateStatus {
+    /// Latest version in the same form as `current`, so the two can be compared as strings.
+    ///
+    /// The tag carries a `v` prefix that the crate version does not; reporting both forms
+    /// unchanged would make an equal pair look different to a caller.
+    #[must_use]
+    pub fn latest_version(&self) -> &str {
+        self.latest_tag.trim_start_matches('v')
+    }
 }
 
 /// The running version, without a leading `v`.
@@ -189,8 +201,8 @@ impl Updater {
         }
         Ok(UpdateStatus {
             current: current_version().to_owned(),
-            latest: latest.clone(),
             available: is_newer(&latest, current_version()),
+            latest_tag: latest,
         })
     }
 
@@ -275,7 +287,11 @@ impl Updater {
         let mut stream = response.bytes_stream();
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|error| UpdateError::Transport(error.to_string()))?;
-            if u64::try_from(body.len() + chunk.len()).map_or(true, |size| size > limit) {
+            let new_len = body
+                .len()
+                .checked_add(chunk.len())
+                .ok_or(UpdateError::TooLarge { limit })?;
+            if u64::try_from(new_len).map_or(true, |size| size > limit) {
                 return Err(UpdateError::TooLarge { limit });
             }
             body.extend_from_slice(&chunk);
@@ -314,14 +330,25 @@ pub fn replace_executable(destination: &Path, binary: &[u8]) -> Result<(), Updat
     let staged = directory.join(format!("websift-update-{}.tmp", std::process::id()));
     std::fs::write(&staged, binary).map_err(UpdateError::Replace)?;
 
+    // Every failure past this point must remove the staging file: a partially applied update
+    // otherwise leaves a full copy of the binary beside the real one on each attempt.
+    let result = stage_into_place(&staged, destination);
+    if result.is_err() {
+        let _ = std::fs::remove_file(&staged);
+    }
+    result
+}
+
+fn stage_into_place(staged: &Path, destination: &Path) -> Result<(), UpdateError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755))
+        std::fs::set_permissions(staged, std::fs::Permissions::from_mode(0o755))
             .map_err(UpdateError::Replace)?;
     }
 
     if cfg!(windows) {
+        // Windows refuses to overwrite a running image, so the current one is moved aside.
         let retired: PathBuf = destination.with_extension("old");
         let _ = std::fs::remove_file(&retired);
         if destination.exists() {
@@ -329,10 +356,7 @@ pub fn replace_executable(destination: &Path, binary: &[u8]) -> Result<(), Updat
         }
     }
 
-    std::fs::rename(&staged, destination).map_err(|error| {
-        let _ = std::fs::remove_file(&staged);
-        UpdateError::Replace(error)
-    })
+    std::fs::rename(staged, destination).map_err(UpdateError::Replace)
 }
 
 #[cfg(test)]
@@ -395,5 +419,39 @@ mod tests {
             .collect();
         assert!(leftovers.is_empty());
         std::fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn leaves_no_staging_file_when_the_replacement_fails() {
+        let directory =
+            std::env::temp_dir().join(format!("websift-test-fail-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        // Renaming onto a directory fails, standing in for any failure after staging.
+        let destination = directory.join("occupied");
+        std::fs::create_dir_all(&destination).unwrap();
+
+        assert!(replace_executable(&destination, b"new").is_err());
+
+        let staged: Vec<_> = std::fs::read_dir(&directory)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains("update"))
+            .collect();
+        assert!(
+            staged.is_empty(),
+            "a failed update must not leave a copy of the binary behind"
+        );
+        std::fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn reports_the_latest_version_in_the_same_form_as_the_current_one() {
+        let status = super::UpdateStatus {
+            current: "0.1.1".to_owned(),
+            latest_tag: "v0.1.1".to_owned(),
+            available: false,
+        };
+        assert_eq!(status.latest_version(), status.current);
+        assert_eq!(status.latest_tag, "v0.1.1");
     }
 }

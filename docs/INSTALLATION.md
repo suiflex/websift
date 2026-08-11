@@ -308,7 +308,7 @@ Requirements:
   release's binary for the running platform, verifies its SHA-256 against the checksum published
   beside it, and only then replaces the executable through a same-directory rename. A failed
   download, checksum, or rename leaves the installed binary untouched.
-- `websift update --check` performs no mutation and reports `update_available`.
+- `websift update --check` performs no mutation and reports `update_available`. Both forms report `latest` in the same form as `current`, plus the exact `latest_tag`, so a caller can compare the two fields directly.
 - Both print one JSON object, so a harness can act on the result without parsing prose.
 - The updater resolves symlinks first, so it replaces the real binary rather than a link to it.
 - Windows cannot overwrite a running image, so the previous executable is moved to `.old` and

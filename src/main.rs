@@ -86,7 +86,8 @@ async fn run_update(check_only: bool) -> Result<(), Box<dyn Error>> {
             serde_json::json!({
                 "command": "update",
                 "current": status.current,
-                "latest": status.latest,
+                "latest": status.latest_version(),
+                "latest_tag": status.latest_tag,
                 "update_available": false,
                 "changed": false,
                 "message": "already on the latest release",
@@ -101,7 +102,8 @@ async fn run_update(check_only: bool) -> Result<(), Box<dyn Error>> {
             serde_json::json!({
                 "command": "update",
                 "current": status.current,
-                "latest": status.latest,
+                "latest": status.latest_version(),
+                "latest_tag": status.latest_tag,
                 "update_available": true,
                 "changed": false,
                 "message": "run `websift update` to install it",
@@ -112,14 +114,15 @@ async fn run_update(check_only: bool) -> Result<(), Box<dyn Error>> {
 
     // Resolve the real path first: replacing a symlink would leave the installed binary untouched.
     let executable = std::env::current_exe()?.canonicalize()?;
-    let binary = updater.download_verified(&status.latest).await?;
+    let binary = updater.download_verified(&status.latest_tag).await?;
     replace_executable(&executable, &binary)?;
     println!(
         "{}",
         serde_json::json!({
             "command": "update",
             "current": status.current,
-            "latest": status.latest,
+            "latest": status.latest_version(),
+                "latest_tag": status.latest_tag,
             "update_available": true,
             "changed": true,
             "path": executable.display().to_string(),
