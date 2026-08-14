@@ -1,0 +1,42 @@
+# Rendered by .github/workflows/release.yml into suiflex/homebrew-tap.
+# Placeholders (@VERSION@, @BASE@, @MAC_ARM_SHA@, @MAC_X64_SHA@, @LINUX_ARM_SHA@,
+# @LINUX_X64_SHA@) are filled in via sed on each release. Edit the template, not
+# the generated file.
+class Websift < Formula
+  desc "Bounded web search, research, mapping, scraping, and crawling over MCP"
+  homepage "https://github.com/suiflex/websift"
+  version "@VERSION@"
+  license "MIT"
+
+  on_macos do
+    on_arm do
+      url "@BASE@/websift-v@VERSION@-aarch64-apple-darwin.tar.gz"
+      sha256 "@MAC_ARM_SHA@"
+    end
+    on_intel do
+      url "@BASE@/websift-v@VERSION@-x86_64-apple-darwin.tar.gz"
+      sha256 "@MAC_X64_SHA@"
+    end
+  end
+
+  on_linux do
+    on_arm do
+      url "@BASE@/websift-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz"
+      sha256 "@LINUX_ARM_SHA@"
+    end
+    on_intel do
+      url "@BASE@/websift-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz"
+      sha256 "@LINUX_X64_SHA@"
+    end
+  end
+
+  def install
+    bin.install "websift"
+  end
+
+  test do
+    # There is no --version flag: the CLI accepts mcp, status, setup, doctor, and update only.
+    # `status` prints its report as JSON and creates nothing on disk.
+    assert_match "\"command\":\"status\"", shell_output("#{bin}/websift status")
+  end
+end
