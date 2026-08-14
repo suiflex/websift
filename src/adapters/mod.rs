@@ -989,7 +989,11 @@ impl McpServer {
                 .enable_all()
                 .build()
                 .expect("crawl runtime initializes");
-            let _ = runtime.block_on(service.run(&worker_id, &worker_request));
+            // A crawl that dies must not leave the job in its starting state: the caller would
+            // poll a job that is never coming back. Record the failure where status can see it.
+            if let Err(error) = runtime.block_on(service.run(&worker_id, &worker_request)) {
+                let _ = service.fail(&worker_id, &stable_crawl_error(&error));
+            }
         });
         let mut workers = self
             .workers

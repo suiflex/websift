@@ -328,6 +328,19 @@ impl<'a> CrawlService<'a> {
         self.status(id)
     }
 
+    /// Move a job to `failed`, recording why.
+    ///
+    /// Used when `run` itself could not continue, so that a caller polling `status` sees a
+    /// terminal state instead of waiting on a job that has already stopped.
+    pub fn fail(&self, id: &str, reason: &str) -> Result<bool, CrawlError> {
+        Ok(self.store.crawl_jobs(&self.profile).set_state(
+            id,
+            "failed",
+            Some(reason),
+            &chrono::Utc::now().to_rfc3339(),
+        )?)
+    }
+
     /// Whether the URL a redirect actually landed on is still permitted.
     ///
     /// An unparseable or unreadable destination is a denial, matching the gate's own posture.
