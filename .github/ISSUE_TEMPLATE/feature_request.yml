@@ -1,0 +1,37 @@
+name: Feature request
+description: Suggest a capability or a change to an existing one
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that Websift makes hard or impossible today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: |
+        If this adds or changes an MCP tool, say what the arguments and the response would be,
+        and what bounds it would enforce. Every operation in Websift is bounded.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Including whether an existing tool can already do this.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: invariants
+    attributes:
+      label: Invariants
+      options:
+        - label: This does not require relaxing an invariant listed in CLAUDE.md, or the proposal explains why relaxing it is acceptable
+          required: false

@@ -1,0 +1,78 @@
+name: Bug report
+description: Something in Websift behaves differently than documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not report security vulnerabilities here. Use
+        [private reporting](https://github.com/suiflex/websift/security/advisories/new) instead.
+
+  - type: textarea
+    id: version
+    attributes:
+      label: Version and configuration
+      description: Output of `websift status`. Redact anything private.
+      render: json
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 15.2 (aarch64) / Ubuntu 24.04 / Windows 11
+    validations:
+      required: true
+
+  - type: input
+    id: client
+    attributes:
+      label: MCP client
+      placeholder: Claude Code / Codex / other
+    validations:
+      required: false
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: Include the tool name and the error code returned, if any.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: The tool call and arguments, or the CLI command. A public URL helps.
+      placeholder: |
+        1. Call `web_crawl_start` with { "url": "https://example.com/", "limit": 5 }
+        2. Call `web_crawl_status` with the returned job_id
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `websift doctor`
+      render: json
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant stderr from the server process. Redact URLs and hostnames you cannot share.
+      render: shell
+    validations:
+      required: false
