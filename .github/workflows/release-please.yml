@@ -1,0 +1,43 @@
+name: release-please
+
+on:
+  # A maintainer starts release preparation explicitly after batching changes.
+  workflow_dispatch:
+  # A merged release PR is finalized automatically into a tag and release.
+  pull_request:
+    types: [closed]
+    branches: [develop]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    # Manual runs prepare or update the release PR. Pull request runs only
+    # finalize a merged Release Please PR, never an application PR.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'release-please--'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+          # A pull request opened with GITHUB_TOKEN does not trigger other
+          # workflows, so the release PR would arrive with no CI at all. A PAT
+          # is what makes the one PR that most needs checks actually get them.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+
+      - uses: googleapis/release-please-action@v5
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          target-branch: develop
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
