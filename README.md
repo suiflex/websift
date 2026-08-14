@@ -46,7 +46,23 @@ Known gaps:
 
 ## Install
 
-**macOS and Linux**
+**Package managers**
+
+```sh
+brew install suiflex/tap/websift          # macOS, Linux
+npm install -g @suiflex/websift           # any platform with Node 18+
+cargo install websift                     # builds from source
+```
+
+```powershell
+scoop bucket add suiflex https://github.com/suiflex/scoop-bucket
+scoop install websift
+```
+
+The npm package is a small installer: it downloads the prebuilt binary for your platform, so
+nothing is compiled and `npx -y @suiflex/websift mcp` works without a global install.
+
+**Install scripts — macOS and Linux**
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/suiflex/websift/main/install.sh | sh
