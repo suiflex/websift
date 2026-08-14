@@ -1179,7 +1179,10 @@ fn stable_search_error(error: &SearchError) -> String {
 
 fn stable_fetch_error(error: &FetchError) -> String {
     match error {
-        FetchError::InvalidUrl(_) => "invalid_url: URL must be a public HTTP(S) URL".to_owned(),
+        FetchError::InvalidUrl(_) | FetchError::Destination(_) => {
+            "invalid_url: URL must be a public HTTP(S) URL".to_owned()
+        }
+        FetchError::Redirect(_) => "blocked_redirect: redirect refused by policy".to_owned(),
         FetchError::BodyTooLarge { .. } => {
             "response_too_large: response exceeded configured limit".to_owned()
         }

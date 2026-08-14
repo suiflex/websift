@@ -321,7 +321,9 @@ pub fn fetch_is_retryable(error: &FetchError) -> bool {
         FetchError::InvalidUrl(_)
         | FetchError::BodyTooLarge { .. }
         | FetchError::MissingContentType
-        | FetchError::InvalidContentType(_) => false,
+        | FetchError::InvalidContentType(_)
+        | FetchError::Redirect(_)
+        | FetchError::Destination(_) => false,
     }
 }
 

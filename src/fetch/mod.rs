@@ -6,11 +6,17 @@ pub mod search;
 use std::time::Duration;
 
 use futures_util::StreamExt;
-use reqwest::{Client, StatusCode, header::CONTENT_TYPE};
+use reqwest::{
+    Client, StatusCode,
+    header::{CONTENT_TYPE, LOCATION},
+};
 
 use crate::{
     config::Config,
-    policy::{DnsResolver, PublicUrl, SystemDnsResolver, ValidatingDnsResolver},
+    policy::{
+        DestinationError, DnsResolver, PublicUrl, RedirectError, RedirectGuard, SystemDnsResolver,
+        UrlError, ValidatingDnsResolver,
+    },
 };
 use std::sync::Arc;
 
@@ -42,6 +48,10 @@ pub enum FetchError {
     BodyTooLarge { limit: u64 },
     #[error("response body could not be read: {0}")]
     ReadBody(#[source] std::io::Error),
+    #[error("redirect refused: {0:?}")]
+    Redirect(RedirectError),
+    #[error("destination validation failed: {0:?}")]
+    Destination(DestinationError),
 }
 
 /// Native HTTP client with explicit timeout and response-size bounds.
@@ -54,6 +64,22 @@ pub struct FetchClient {
 
 const RESOLVE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_ADDRESSES: usize = 16;
+/// Hops allowed per request. Ordinary normalization costs one or two.
+const MAX_REDIRECTS: usize = 5;
+
+/// Resolve one `Location` header against the URL it was served from.
+///
+/// Relative targets are the common case, so they are joined rather than refused. The result is
+/// revalidated as a public URL, which is what keeps scheme, port, and host policy applied to a
+/// destination the origin chose rather than the caller.
+fn redirect_target(current: &str, location: &str) -> Result<PublicUrl, FetchError> {
+    let base =
+        url::Url::parse(current).map_err(|_| FetchError::InvalidUrl(UrlError::InvalidHost))?;
+    let joined = base
+        .join(location)
+        .map_err(|_| FetchError::Redirect(RedirectError::InvalidDestination))?;
+    PublicUrl::parse(joined.as_str()).map_err(FetchError::InvalidUrl)
+}
 
 #[allow(clippy::needless_pass_by_value)]
 fn fetch_transport_error(error: reqwest::Error) -> FetchError {
@@ -147,15 +173,31 @@ impl FetchClient {
     ///
     /// Returns validation, transport, status, content-type, or size-limit failures.
     pub async fn get(&self, input: &str) -> Result<FetchResult, FetchError> {
-        let url = PublicUrl::parse(input).map_err(FetchError::InvalidUrl)?;
-        let response = self
-            .client
-            .get(url.as_str())
-            .timeout(self.timeout)
-            .send()
-            .await
-            .map_err(fetch_transport_error)?;
-        let status = response.status();
+        let mut url = PublicUrl::parse(input).map_err(FetchError::InvalidUrl)?;
+        let mut guard = RedirectGuard::new(&url, MAX_REDIRECTS).map_err(FetchError::Destination)?;
+        let (response, status) = loop {
+            let response = self
+                .client
+                .get(url.as_str())
+                .timeout(self.timeout)
+                .send()
+                .await
+                .map_err(fetch_transport_error)?;
+            let status = response.status();
+            if !status.is_redirection() {
+                break (response, status);
+            }
+            // Redirects are followed here rather than by the client so that every hop passes
+            // through URL policy and the hop, port, and downgrade bounds of the guard.
+            let location = response
+                .headers()
+                .get(LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .ok_or(FetchError::Status(status))?;
+            let next = redirect_target(url.as_str(), location)?;
+            guard.check(&next).map_err(FetchError::Redirect)?;
+            url = next;
+        };
         if !status.is_success() {
             return Err(FetchError::Status(status));
         }
@@ -243,6 +285,71 @@ mod tests {
         let client = FetchClient::new(Duration::from_secs(1), 5).unwrap();
         let result = client.get("http://127.0.0.1/").await;
         assert!(matches!(result, Err(FetchError::InvalidUrl(_))));
+    }
+
+    #[test]
+    fn resolves_redirect_targets_and_keeps_url_policy_on_every_hop() {
+        let from = "https://example.test/a/b";
+        // Absolute, relative, root-relative, and protocol-relative targets all appear in the wild.
+        assert_eq!(
+            super::redirect_target(from, "https://other.test/x")
+                .unwrap()
+                .as_str(),
+            "https://other.test/x"
+        );
+        assert_eq!(
+            super::redirect_target(from, "c").unwrap().as_str(),
+            "https://example.test/a/c"
+        );
+        assert_eq!(
+            super::redirect_target(from, "/x?y=1").unwrap().as_str(),
+            "https://example.test/x?y=1"
+        );
+        assert_eq!(
+            super::redirect_target(from, "//other.test/x")
+                .unwrap()
+                .as_str(),
+            "https://other.test/x"
+        );
+        // A hop is a destination the origin chose, so it faces the same policy as a caller's URL.
+        assert!(matches!(
+            super::redirect_target(from, "https://example.test:8443/x"),
+            Err(FetchError::InvalidUrl(_))
+        ));
+        assert!(matches!(
+            super::redirect_target(from, "http://localhost/x"),
+            Err(FetchError::InvalidUrl(_))
+        ));
+        assert!(matches!(
+            super::redirect_target(from, "http://127.0.0.1/x"),
+            Err(FetchError::InvalidUrl(_))
+        ));
+        assert!(matches!(
+            super::redirect_target(from, "ftp://example.test/x"),
+            Err(FetchError::InvalidUrl(_))
+        ));
+    }
+
+    #[test]
+    fn redirect_guard_bounds_hops_and_refuses_downgrade() {
+        let origin = crate::policy::PublicUrl::parse("https://example.test/").unwrap();
+        let mut guard = crate::policy::RedirectGuard::new(&origin, super::MAX_REDIRECTS).unwrap();
+        for _ in 0..super::MAX_REDIRECTS {
+            let next = crate::policy::PublicUrl::parse("https://example.test/next").unwrap();
+            assert!(guard.check(&next).is_ok());
+        }
+        let next = crate::policy::PublicUrl::parse("https://example.test/next").unwrap();
+        assert_eq!(
+            guard.check(&next),
+            Err(crate::policy::RedirectError::LimitExceeded)
+        );
+
+        let mut guard = crate::policy::RedirectGuard::new(&origin, super::MAX_REDIRECTS).unwrap();
+        let downgrade = crate::policy::PublicUrl::parse("http://example.test/next").unwrap();
+        assert_eq!(
+            guard.check(&downgrade),
+            Err(crate::policy::RedirectError::Downgrade)
+        );
     }
 
     #[test]
