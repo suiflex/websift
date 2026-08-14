@@ -3,12 +3,21 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # Registry-only recovery for a tag that already built and released. A registry
+  # hiccup must not mean rebuilding binaries or re-pushing taps that succeeded.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to republish to crates.io and npm
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
   build:
+    if: github.event_name == 'push'
     strategy:
       fail-fast: false
       matrix:
@@ -72,6 +81,7 @@ jobs:
           if-no-files-found: error
 
   publish:
+    if: github.event_name == 'push'
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -90,6 +100,7 @@ jobs:
   # re-fetch and no race against release-asset propagation.
 
   publish-homebrew:
+    if: github.event_name == 'push'
     needs: publish
     runs-on: ubuntu-latest
     steps:
@@ -131,6 +142,7 @@ jobs:
           git push
 
   publish-scoop:
+    if: github.event_name == 'push'
     needs: publish
     runs-on: ubuntu-latest
     steps:
@@ -165,3 +177,113 @@ jobs:
           git add bucket/websift.json
           git commit -m "websift ${VERSION}" || { echo "no change"; exit 0; }
           git push
+
+  # ---- registries: published through GitHub OIDC Trusted Publishing ----
+  # No registry token is stored. Both registries verify the repository, the workflow file, and
+  # the environment name, so `Release` must exist and must not be renamed.
+
+  publish-crates:
+    if: github.event_name == 'push'
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: Release
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          manifest="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          # A crates.io version is immutable, so refuse to publish one that does not match the
+          # tag rather than burning the number on the wrong source.
+          [ "$manifest" = "$VERSION" ] || {
+            echo "::error::Cargo.toml is $manifest but the tag is $VERSION"; exit 1; }
+          # The sparse index is what cargo itself resolves against and updates within seconds.
+          # `cargo search` hits the separate search service, which can lag past any timeout.
+          if curl -sf "https://index.crates.io/we/bs/websift" | grep -q "\"vers\":\"${VERSION}\""; then
+            echo "websift ${VERSION} is already on crates.io"
+          else
+            cargo publish
+          fi
+
+  publish-npm:
+    # Must follow `publish`: the package's postinstall downloads the release assets, so
+    # publishing first would leave anyone installing in the gap with a 404.
+    if: github.event_name == 'push'
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: Release
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm >= 11.5.1 and node 20 ships npm 10. Stay below npm 12,
+      # which drops the node 20 runner.
+      - run: npm install -g npm@11.5.2
+      - name: Publish to npm
+        working-directory: npm
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          npm version "${TAG#v}" --no-git-tag-version --allow-same-version
+          npm publish --access public
+
+  recover-registries:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: Release
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - name: Publish to crates.io if missing
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          if curl -sf "https://index.crates.io/we/bs/websift" | grep -q "\"vers\":\"${VERSION}\""; then
+            echo "websift ${VERSION} is already on crates.io"
+          else
+            cargo publish
+          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@11.5.2
+      - name: Publish to npm if missing
+        working-directory: npm
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          if npm view "@suiflex/websift@${VERSION}" version >/dev/null 2>&1; then
+            echo "@suiflex/websift ${VERSION} is already on npm"
+          else
+            npm version "${VERSION}" --no-git-tag-version --allow-same-version
+            npm publish --access public
+          fi
