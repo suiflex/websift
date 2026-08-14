@@ -56,7 +56,9 @@ These are load-bearing. Do not relax one without saying so explicitly in the cha
   `ValidatingDnsResolver` in `src/policy/` is installed on every `reqwest` client, which is what
   closes DNS rebinding. A hostname-only check would not.
 - **Every redirect hop is revalidated**, hop count is bounded, and HTTPS→HTTP downgrade is
-  refused (`RedirectGuard`).
+  refused (`RedirectGuard`, driven by the loop in `FetchClient::get`). Because the origin picks
+  where a redirect lands, crawl and research recheck the robots gate against the **final** URL
+  whenever it differs from the one that was cleared.
 - **Everything is bounded**: response bytes, extracted characters, crawl depth and pages, redirect
   hops, wall-clock budgets, global and per-host concurrency, `robots.txt` document size, and
   robots cache entries. A new operation without a bound is incomplete.

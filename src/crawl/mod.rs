@@ -259,6 +259,16 @@ impl<'a> CrawlService<'a> {
                 );
                 continue;
             };
+            // The gate cleared the requested URL, but the origin chose where the redirect landed.
+            // Ask again about the final URL so a redirect cannot carry us into a disallowed path.
+            if fetched.url != url && !self.final_url_is_allowed(&fetched.url).await {
+                let _ = self.store.crawl_urls(&self.profile).set_state(
+                    &url_id,
+                    "failed",
+                    Some("robots_disallowed"),
+                );
+                continue;
+            }
             let extracted = match extract::extract(
                 &fetched.body,
                 &fetched.content_type,
@@ -316,6 +326,19 @@ impl<'a> CrawlService<'a> {
             )?;
         }
         self.status(id)
+    }
+
+    /// Whether the URL a redirect actually landed on is still permitted.
+    ///
+    /// An unparseable or unreadable destination is a denial, matching the gate's own posture.
+    async fn final_url_is_allowed(&self, final_url: &str) -> bool {
+        let Ok(parsed) = Url::parse(final_url) else {
+            return false;
+        };
+        matches!(
+            self.robots.check(&parsed).await,
+            RobotsDecision::Allowed { .. }
+        )
     }
 
     fn enqueue_links(
@@ -565,6 +588,29 @@ mod tests {
         let status = service.run(&id, &request).await.unwrap();
         assert_eq!(status.pages, 0);
         assert_eq!(store.crawl_urls("test").pending(&id, 1).unwrap().len(), 0);
+    }
+
+    // Redirects are followed, so the URL that was cleared is not always the URL that was fetched.
+    #[tokio::test]
+    async fn a_redirect_destination_is_checked_against_robots_before_it_is_kept() {
+        let store = Store::open_in_memory().unwrap();
+        let fetch = FetchClient::new(Duration::from_secs(1), 1024).unwrap();
+        let robots_fetcher: RobotsFetcher = std::sync::Arc::new(|_| {
+            Box::pin(async { Ok("User-agent: websift\nDisallow: /private\nAllow: /".to_owned()) })
+        });
+        let service = CrawlService::with_robots_fetcher(&store, fetch, "test", robots_fetcher);
+        assert!(
+            service
+                .final_url_is_allowed("https://example.com/public")
+                .await
+        );
+        assert!(
+            !service
+                .final_url_is_allowed("https://example.com/private/page")
+                .await
+        );
+        // A destination that is not a URL at all is a denial, not a pass.
+        assert!(!service.final_url_is_allowed("not a url").await);
     }
 
     #[tokio::test]
