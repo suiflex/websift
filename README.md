@@ -155,21 +155,25 @@ cargo run -- mcp --profile codex
 Checks that must pass before a change lands:
 
 ```sh
-cargo fmt --check
-cargo check --all-targets
-cargo test
-cargo clippy --all-targets -- -D warnings
-npm test --prefix browser-worker
-jq empty schemas/worker-v1.schema.json
+make check
 ```
 
-Continuous integration runs these on Linux, macOS, and Windows.
+That wraps `cargo fmt --check`, `cargo check --all-targets`, `cargo test`, `cargo clippy
+--all-targets -- -D warnings`, the browser-worker tests, and the npm asset-name selftest.
+Continuous integration runs the Rust chain on Linux, macOS, and Windows.
 
 ## More
 
 Every tool validates its arguments and returns stable error codes; call `websift_status` or
 `websift doctor` to see what a given installation actually loaded. Release-by-release changes are
 in the [changelog](./CHANGELOG.md).
+
+## Contributing
+
+Bug reports, features, and pull requests are welcome — start with
+[CONTRIBUTING.md](./CONTRIBUTING.md). Security issues go through
+[private reporting](https://github.com/suiflex/websift/security/advisories/new), never a public
+issue; see [SECURITY.md](./SECURITY.md).
 
 ## License
 

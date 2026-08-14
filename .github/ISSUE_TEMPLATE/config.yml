@@ -3,3 +3,6 @@ contact_links:
   - name: Report a security vulnerability
     url: https://github.com/suiflex/websift/security/advisories/new
     about: Report privately. Please do not open a public issue for a security problem.
+  - name: Contributing guide
+    url: https://github.com/suiflex/websift/blob/develop/CONTRIBUTING.md
+    about: How to build, test, and submit a change.
