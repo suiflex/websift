@@ -48,7 +48,10 @@ These are load-bearing. Do not relax one without saying so explicitly in the cha
 
 - **Robots is deny-by-default.** An origin whose `robots.txt` cannot be read is denied, not
   assumed permissive (`RobotsDecision::Unavailable`). Every operation that fetches a page it did
-  not author goes through `RobotsGate`.
+  not author goes through `RobotsGate`. The single exception is `RobotsFetchError::Absent` — a
+  404 or 410 means the site published nothing to obey, so the origin is allowed. Deliberately
+  narrower than RFC 9309 §2.3.1.3, which permits the whole 4xx range: 401, 403, and 429 stay
+  denied because they say access is restricted, not that it is free.
 - **Private-address rejection happens after DNS resolution**, not by inspecting the hostname.
   `ValidatingDnsResolver` in `src/policy/` is installed on every `reqwest` client, which is what
   closes DNS rebinding. A hostname-only check would not.

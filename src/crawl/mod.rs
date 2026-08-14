@@ -528,7 +528,7 @@ mod tests {
 
     use super::{CrawlBudgets, CrawlRequest, CrawlService, CrawlState, MapOptions, map_documents};
     use crate::robots::ROBOTS_USER_AGENT;
-    use crate::robots::RobotsFetcher;
+    use crate::robots::{RobotsFetchError, RobotsFetcher};
     use crate::{fetch::FetchClient, storage::Store};
 
     #[test]
@@ -553,7 +553,8 @@ mod tests {
     async fn unavailable_robots_default_deny_without_fetching_page() {
         let store = Store::open_in_memory().unwrap();
         let fetch = FetchClient::new(Duration::from_secs(1), 1024).unwrap();
-        let robots_fetcher: RobotsFetcher = std::sync::Arc::new(|_| Box::pin(async { Err(()) }));
+        let robots_fetcher: RobotsFetcher =
+            std::sync::Arc::new(|_| Box::pin(async { Err(RobotsFetchError::Unreadable) }));
         let service = CrawlService::with_robots_fetcher(&store, fetch, "test", robots_fetcher);
         let request = CrawlRequest {
             seed_url: "https://example.com/".into(),
