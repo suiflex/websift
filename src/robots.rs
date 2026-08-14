@@ -3,7 +3,9 @@
 //! Crawling and research must answer the same question — may this client fetch this URL, and how
 //! long must it wait first — so the cache, the unavailable-origin memory, and the per-host
 //! schedule live here instead of being restated per caller. An origin whose `robots.txt` cannot
-//! be read is denied rather than assumed permissive.
+//! be read is denied rather than assumed permissive. The one exception is an origin that answers
+//! that no rules exist: 404 and 410 mean the site published nothing to obey, which RFC 9309
+//! treats as full permission.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -15,8 +17,10 @@ use std::{
 
 use url::Url;
 
+use reqwest::StatusCode;
+
 use crate::{
-    fetch::FetchClient,
+    fetch::{FetchClient, FetchError},
     policy::{RobotsCache, RobotsRules},
 };
 
@@ -26,7 +30,16 @@ const ROBOTS_MAX_BYTES: usize = 512 * 1024;
 const ROBOTS_CACHE_TTL: Duration = Duration::from_secs(300);
 const ROBOTS_CACHE_ENTRIES: usize = 256;
 
-type RobotsFetchFuture = Pin<Box<dyn Future<Output = Result<String, ()>> + Send>>;
+/// Why a `robots.txt` document could not be read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RobotsFetchError {
+    /// The origin answered that no rules exist, so there is nothing to obey.
+    Absent,
+    /// Unreachable, refused, or unreadable. The origin stays denied.
+    Unreadable,
+}
+
+type RobotsFetchFuture = Pin<Box<dyn Future<Output = Result<String, RobotsFetchError>> + Send>>;
 /// Fetches one `robots.txt` document. Injectable so tests never touch the network.
 pub type RobotsFetcher = Arc<dyn Fn(String) -> RobotsFetchFuture + Send + Sync>;
 
@@ -63,8 +76,19 @@ impl RobotsGate {
         Self::with_fetcher(Arc::new(move |url| {
             let fetch = fetch.clone();
             Box::pin(async move {
-                let result = fetch.get(&url).await.map_err(|_| ())?;
-                String::from_utf8(result.body).map_err(|_| ())
+                let result = fetch.get(&url).await.map_err(|error| match error {
+                    // Only "there is nothing here" counts as absent. This is stricter than RFC
+                    // 9309, which lets the whole 4xx range mean full permission: 401 and 403 say
+                    // access is restricted and 429 says we are being rate limited, so reading
+                    // either as permission inverts what the origin asked for.
+                    FetchError::Status(status)
+                        if status == StatusCode::NOT_FOUND || status == StatusCode::GONE =>
+                    {
+                        RobotsFetchError::Absent
+                    }
+                    _ => RobotsFetchError::Unreadable,
+                })?;
+                String::from_utf8(result.body).map_err(|_| RobotsFetchError::Unreadable)
             })
         }))
     }
@@ -96,12 +120,18 @@ impl RobotsGate {
             return Err(());
         }
         let robots_url = format!("{origin}/robots.txt");
-        let Ok(document) = (self.fetcher)(robots_url).await else {
-            self.unavailable
-                .lock()
-                .map_err(|_| ())?
-                .insert(origin.to_owned());
-            return Err(());
+        let document = match (self.fetcher)(robots_url).await {
+            Ok(document) => document,
+            // No rules published means nothing to obey. The permissive result is cached like any
+            // other document so one 404 does not become a refetch per candidate URL.
+            Err(RobotsFetchError::Absent) => String::new(),
+            Err(RobotsFetchError::Unreadable) => {
+                self.unavailable
+                    .lock()
+                    .map_err(|_| ())?
+                    .insert(origin.to_owned());
+                return Err(());
+            }
         };
         let rules = RobotsRules::parse(&document, ROBOTS_MAX_BYTES);
         self.cache
@@ -173,12 +203,22 @@ pub fn path_and_query(url: &Url) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{RobotsDecision, RobotsGate, origin_key, path_and_query};
+    use super::{RobotsDecision, RobotsFetchError, RobotsGate, origin_key, path_and_query};
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
     use url::Url;
+
+    fn gate_failing(error: RobotsFetchError, calls: Arc<AtomicUsize>) -> RobotsGate {
+        RobotsGate::with_fetcher(Arc::new(move |_| {
+            let calls = Arc::clone(&calls);
+            Box::pin(async move {
+                calls.fetch_add(1, Ordering::Relaxed);
+                Err(error)
+            })
+        }))
+    }
 
     fn gate_returning(document: &'static str, calls: Arc<AtomicUsize>) -> RobotsGate {
         RobotsGate::with_fetcher(Arc::new(move |_| {
@@ -209,15 +249,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn absent_rules_allow_instead_of_denying_the_whole_origin() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let gate = gate_failing(RobotsFetchError::Absent, Arc::clone(&calls));
+        let url = Url::parse("https://example.test/anything").unwrap();
+        assert!(matches!(
+            gate.check(&url).await,
+            RobotsDecision::Allowed { .. }
+        ));
+        // The permissive answer is cached, so a missing document is fetched once per origin.
+        assert!(matches!(
+            gate.check(&url).await,
+            RobotsDecision::Allowed { .. }
+        ));
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
     async fn unreadable_rules_deny_instead_of_assuming_permission() {
         let calls = Arc::new(AtomicUsize::new(0));
-        let gate = RobotsGate::with_fetcher(Arc::new(move |_| {
-            let calls = Arc::clone(&calls);
-            Box::pin(async move {
-                calls.fetch_add(1, Ordering::Relaxed);
-                Err(())
-            })
-        }));
+        let gate = gate_failing(RobotsFetchError::Unreadable, Arc::clone(&calls));
         let url = Url::parse("https://example.test/page").unwrap();
         assert_eq!(gate.check(&url).await, RobotsDecision::Unavailable);
         // A failed origin is remembered, so it is not refetched for every candidate URL.

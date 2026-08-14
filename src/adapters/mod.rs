@@ -953,47 +953,55 @@ impl McpServer {
                 concurrency: usize::from(self.config.crawl_concurrency),
             },
         };
-        let store = self
-            .store
-            .try_lock()
-            .map_err(|_| "internal_error: storage busy".to_owned())?;
-        let service = CrawlService::new(
-            &store,
-            FetchClient::from_config(&self.config).map_err(|e| stable_fetch_error(&e))?,
-            self.status.profile.clone(),
-        );
-        let job_id = service
-            .start(&request)
-            .map_err(|error| stable_crawl_error(&error))?;
-        let status = service
-            .status(&job_id)
-            .map_err(|error| stable_crawl_error(&error))?;
-        let worker_store = Arc::clone(&self.store);
         let worker_profile = self.status.profile.clone();
         let worker_fetch =
             FetchClient::from_config(&self.config).map_err(|error| stable_fetch_error(&error))?;
-        let worker_id = job_id.clone();
         let worker_request = request.clone();
-        let worker_store = {
-            let store = worker_store
-                .lock()
-                .map_err(|_| "internal_error: storage unavailable".to_owned())?;
-            store
+        // The worker's own connection is opened under this guard rather than by locking the shared
+        // store a second time: the lock is not reentrant, so a second acquisition parks this thread.
+        let (job_id, status, worker_store) = {
+            let store = self
+                .store
+                .try_lock()
+                .map_err(|_| "internal_error: storage busy".to_owned())?;
+            let service = CrawlService::new(
+                &store,
+                FetchClient::from_config(&self.config).map_err(|e| stable_fetch_error(&e))?,
+                self.status.profile.clone(),
+            );
+            let job_id = service
+                .start(&request)
+                .map_err(|error| stable_crawl_error(&error))?;
+            let status = service
+                .status(&job_id)
+                .map_err(|error| stable_crawl_error(&error))?;
+            let worker_store = store
                 .open_worker_store()
-                .map_err(|_| "internal_error: storage unavailable".to_owned())?
+                .map_err(|_| "internal_error: storage unavailable".to_owned())?;
+            (job_id, status, worker_store)
         };
+        let worker_id = job_id.clone();
         let handle = tokio::task::spawn_blocking(move || {
             let service = CrawlService::new(&worker_store, worker_fetch, worker_profile);
+            // The crawl fetches robots.txt and pages, so this runtime needs the I/O driver as well
+            // as the timer; without it every connection attempt panics inside the blocking task.
             let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_time()
+                .enable_all()
                 .build()
                 .expect("crawl runtime initializes");
-            let _ = runtime.block_on(service.run(&worker_id, &worker_request));
+            // A crawl that dies must not leave the job in its starting state: the caller would
+            // poll a job that is never coming back. Record the failure where status can see it.
+            if let Err(error) = runtime.block_on(service.run(&worker_id, &worker_request)) {
+                let _ = service.fail(&worker_id, &stable_crawl_error(&error));
+            }
         });
-        self.workers
+        let mut workers = self
+            .workers
             .lock()
-            .map_err(|_| "internal_error: worker registry unavailable".to_owned())?
-            .push(handle);
+            .map_err(|_| "internal_error: worker registry unavailable".to_owned())?;
+        // Finished handles are never joined, so drop them here instead of growing without bound.
+        workers.retain(|worker| !worker.is_finished());
+        workers.push(handle);
         Ok(Json(WebCrawlStartResponse {
             job_id,
             status,
@@ -1175,7 +1183,10 @@ fn stable_search_error(error: &SearchError) -> String {
 
 fn stable_fetch_error(error: &FetchError) -> String {
     match error {
-        FetchError::InvalidUrl(_) => "invalid_url: URL must be a public HTTP(S) URL".to_owned(),
+        FetchError::InvalidUrl(_) | FetchError::Destination(_) => {
+            "invalid_url: URL must be a public HTTP(S) URL".to_owned()
+        }
+        FetchError::Redirect(_) => "blocked_redirect: redirect refused by policy".to_owned(),
         FetchError::BodyTooLarge { .. } => {
             "response_too_large: response exceeded configured limit".to_owned()
         }
@@ -1210,9 +1221,12 @@ mod tests {
 
     use std::collections::HashMap;
 
-    use super::{McpServer, stable_fetch_error, stable_search_error};
+    use super::{
+        Duration, McpServer, Parameters, RuntimeStatus, stable_fetch_error, stable_search_error,
+    };
     use crate::{
         config::Config,
+        crawl::CrawlState,
         fetch::{FetchError, search::SearchError},
     };
     use reqwest::StatusCode;
@@ -1458,6 +1472,67 @@ mod tests {
             rejected.err().unwrap(),
             "invalid_input: domains must contain at most 20 hostnames"
         );
+    }
+
+    // Every other crawl test drives `CrawlService` directly, so the adapter path was never
+    // exercised and a self-deadlock in `web_crawl_start` shipped unnoticed. This test enters
+    // through the tool the way a client does.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn crawl_start_returns_and_the_job_reaches_a_terminal_state() {
+        let server = McpServer::with_store(
+            test_config(),
+            RuntimeStatus::new("codex").expect("valid profile"),
+            crate::storage::Store::open_in_memory().expect("in-memory store"),
+        );
+        let params: super::WebCrawlStartParams = serde_json::from_value(serde_json::json!({
+            "url": "https://crawl-start-regression.invalid/",
+            "limit": 1,
+            "max_depth": 0,
+            "max_duration_seconds": 5,
+        }))
+        .expect("valid crawl parameters");
+
+        // `web_crawl_start` is synchronous, so a deadlock parks an OS thread rather than a task.
+        // Running it on the blocking pool lets the timeout observe the hang instead of joining it.
+        let started = {
+            let server = server.clone();
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                tokio::task::spawn_blocking(move || server.web_crawl_start(Parameters(params))),
+            )
+            .await
+            // A parked blocking thread also blocks runtime shutdown, so a plain panic here would
+            // hang the harness instead of reporting the regression. Fail the process outright.
+            .unwrap_or_else(|_| {
+                eprintln!("web_crawl_start deadlocked instead of returning");
+                std::process::exit(101);
+            })
+            .expect("crawl task joins")
+            .expect("crawl job starts")
+        };
+        let job_id = started.0.job_id;
+
+        // The seed host never resolves, so the robots gate reports the origin unavailable, the
+        // queue drains, and the job settles without touching the network.
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let state = loop {
+            let params: super::WebCrawlJobParams =
+                serde_json::from_value(serde_json::json!({ "job_id": job_id }))
+                    .expect("valid job parameters");
+            let status = server
+                .web_crawl_status(Parameters(params))
+                .expect("crawl status is readable");
+            if !matches!(status.0.state, CrawlState::Queued | CrawlState::Running) {
+                break status.0.state;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "crawl job never left {:?}",
+                status.0.state
+            );
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        };
+        assert_eq!(state, CrawlState::Completed);
     }
 
     #[tokio::test]

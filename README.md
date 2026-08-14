@@ -154,3 +154,7 @@ Continuous integration runs these on Linux, macOS, and Windows.
 Every tool validates its arguments and returns stable error codes; call `websift_status` or
 `websift doctor` to see what a given installation actually loaded. Release-by-release changes are
 in the [changelog](./CHANGELOG.md).
+
+## License
+
+MIT. See [LICENSE](./LICENSE).

@@ -1,6 +1,8 @@
 //! Core library for Websift.
 //!
-//! The MCP boundary is runnable; retrieval behavior remains intentionally absent.
+//! Bounded web retrieval behind an MCP boundary: search, research, mapping, scraping, and
+//! crawling, each gated by the shared robots and public-destination policy in [`policy`] and
+//! persisted per profile by [`storage`].
 
 pub mod adapters;
 pub mod application;

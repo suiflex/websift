@@ -321,7 +321,9 @@ pub fn fetch_is_retryable(error: &FetchError) -> bool {
         FetchError::InvalidUrl(_)
         | FetchError::BodyTooLarge { .. }
         | FetchError::MissingContentType
-        | FetchError::InvalidContentType(_) => false,
+        | FetchError::InvalidContentType(_)
+        | FetchError::Redirect(_)
+        | FetchError::Destination(_) => false,
     }
 }
 
@@ -886,6 +888,18 @@ async fn retrieve_page(
         Ok(fetched) => fetched,
         Err(error) => return PageOutcome::Fetch(error),
     };
+    // The gate cleared the requested URL, but the origin chose where the redirect landed. Ask
+    // again about the final URL so a redirect cannot carry us into a disallowed path.
+    if fetched.url != url {
+        let Ok(final_parsed) = Url::parse(&fetched.url) else {
+            return PageOutcome::RobotsUnavailable;
+        };
+        match deps.robots.check(&final_parsed).await {
+            RobotsDecision::Allowed { .. } => {}
+            RobotsDecision::Disallowed => return PageOutcome::RobotsDisallowed,
+            RobotsDecision::Unavailable => return PageOutcome::RobotsUnavailable,
+        }
+    }
     let document = match extract(
         &fetched.body,
         &fetched.content_type,

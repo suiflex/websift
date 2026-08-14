@@ -3,6 +3,10 @@ name = "websift"
 version = "0.2.2"
 edition = "2024"
 rust-version = "1.88"
+description = "Bounded web search, research, mapping, scraping, and crawling over MCP"
+repository = "https://github.com/suiflex/websift"
+license = "MIT"
+# Distribution is through GitHub releases and the install scripts, not crates.io.
 publish = false
 
 [lib]
