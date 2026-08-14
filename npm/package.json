@@ -1,7 +1,7 @@
 {
   "name": "@suiflex/websift",
-  "version": "0.2.2",
-  "description": "Websift \u2014 bounded web search, research, mapping, scraping, and crawling over MCP",
+  "version": "0.3.0",
+  "description": "Websift — bounded web search, research, mapping, scraping, and crawling over MCP",
   "homepage": "https://github.com/suiflex/websift",
   "repository": {
     "type": "git",
