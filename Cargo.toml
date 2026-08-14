@@ -6,8 +6,17 @@ rust-version = "1.88"
 description = "Bounded web search, research, mapping, scraping, and crawling over MCP"
 repository = "https://github.com/suiflex/websift"
 license = "MIT"
-# Distribution is through GitHub releases and the install scripts, not crates.io.
-publish = false
+readme = "README.md"
+# The crate carries its source and migrations. The browser worker, JSON schemas, installers, and
+# assets are repository-only: they are not compiled in and would just inflate every download.
+include = [
+    "src/**/*",
+    "migrations/*.sql",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+]
 
 [lib]
 name = "websift"

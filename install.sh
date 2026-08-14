@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install the websift binary from a published GitHub release.
 #
-#   curl -fsSL https://raw.githubusercontent.com/suiflex/websift/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/suiflex/websift/HEAD/install.sh | sh
 #
 # Environment overrides:
 #   VERSION      release tag to install (default: latest)

@@ -120,6 +120,32 @@ Note that `src/policy/` rejects private addresses, so a localhost test server is
 from any client built by `FetchClient::from_config`. Tests either inject a resolver through
 `FetchClient::with_resolver` or use a host that never resolves.
 
+## Releasing
+
+Versions are owned by release-please. Never bump `Cargo.toml`, `npm/package.json`, or
+`CHANGELOG.md` by hand, and never push a `v*` tag by hand — the release PR does both together, and
+a manual edit only creates a conflict for the next run.
+
+1. A maintainer dispatches `.github/workflows/release-please.yml` when a batch is ready.
+2. release-please opens a release PR bumping `Cargo.toml`, `Cargo.lock`, `npm/package.json`, and
+   `CHANGELOG.md` from the conventional-commit history. Merging it tags `vX.Y.Z`.
+3. The tag runs `.github/workflows/release.yml`: six targets built, assets and checksums attached
+   to the GitHub Release, then the formula and manifest rendered from `packaging/` into
+   `suiflex/homebrew-tap` and `suiflex/scoop-bucket`, and the crate and npm package published.
+
+Because the changelog is generated, the commit subject *is* the release note. Conventional-commit
+types are enforced by that, not just by convention.
+
+Release assets are named `websift-<tag>-<triple>[.tar.gz|.zip]`, with the bare binary alongside
+them. `update::asset_name` (`src/update.rs:109`), `npm/install.js`, and both `packaging/`
+templates all resolve that exact string, so renaming an asset breaks self-update and every package
+manager at once. `npm/install.js --selftest` asserts the mapping and runs in CI.
+
+crates.io and npm publish through GitHub OIDC Trusted Publishing from the `Release` environment,
+so no registry token is stored anywhere. Two repository secrets are still required:
+`RELEASE_PLEASE_TOKEN` (release-please needs a PAT — a PR opened with `GITHUB_TOKEN` triggers no
+CI) and `TAP_PUBLISH_TOKEN` (push access to the two tap repositories).
+
 ## Verification
 
 ```sh

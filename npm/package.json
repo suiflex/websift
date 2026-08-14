@@ -1,0 +1,33 @@
+{
+  "name": "@suiflex/websift",
+  "version": "0.2.2",
+  "description": "Websift \u2014 bounded web search, research, mapping, scraping, and crawling over MCP",
+  "homepage": "https://github.com/suiflex/websift",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/suiflex/websift.git"
+  },
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "web-scraping",
+    "crawler",
+    "search"
+  ],
+  "bin": {
+    "websift": "bin/websift.js"
+  },
+  "files": [
+    "bin/websift.js",
+    "install.js",
+    "README.md"
+  ],
+  "scripts": {
+    "postinstall": "node install.js",
+    "test": "node install.js --selftest"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
