@@ -65,7 +65,7 @@ nothing is compiled and `npx -y @suiflex/websift mcp` works without a global ins
 **Install scripts — macOS and Linux**
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/suiflex/websift/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/suiflex/websift/HEAD/install.sh | sh
 ```
 
 Installs to `~/.local/bin`. Add that directory to your `PATH` if the installer says so.
@@ -73,7 +73,7 @@ Installs to `~/.local/bin`. Add that directory to your `PATH` if the installer s
 **Windows (PowerShell)**
 
 ```powershell
-irm https://raw.githubusercontent.com/suiflex/websift/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/suiflex/websift/HEAD/install.ps1 | iex
 ```
 
 Installs to `%LOCALAPPDATA%\Programs\websift` and adds it to your user `PATH`. Reopen your

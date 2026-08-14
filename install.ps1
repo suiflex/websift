@@ -3,7 +3,7 @@
 Install the websift binary from a published GitHub release.
 
 .EXAMPLE
-irm https://raw.githubusercontent.com/suiflex/websift/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/suiflex/websift/HEAD/install.ps1 | iex
 
 .NOTES
 Environment overrides:
