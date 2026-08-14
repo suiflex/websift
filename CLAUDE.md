@@ -148,6 +148,8 @@ CI) and `TAP_PUBLISH_TOKEN` (push access to the two tap repositories).
 
 ## Verification
 
+`make check` runs the whole chain below; `.github/workflows/ci.yml` remains the authority.
+
 ```sh
 cargo fmt --check
 cargo check --all-targets
