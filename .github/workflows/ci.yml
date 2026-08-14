@@ -49,6 +49,9 @@ jobs:
           node-version: '22'
       - run: npm test --prefix browser-worker
       - run: jq empty schemas/worker-v1.schema.json
+      # The npm installer maps platforms to release asset names. Check that mapping on every
+      # change rather than discovering a typo when a release is already tagged.
+      - run: node npm/install.js --selftest
 
   install-script:
     runs-on: ubuntu-latest
