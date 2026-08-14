@@ -3,6 +3,25 @@
 Notable changes per release. Versions follow semantic versioning; the release tag is the version
 prefixed with `v`, which is also the tag `websift update` compares against.
 
+## [0.3.0](https://github.com/suiflex/websift/compare/v0.2.2...v0.3.0) (2026-08-14)
+
+
+### Features
+
+* automate releases and publish to every distribution channel ([8bc0519](https://github.com/suiflex/websift/commit/8bc05199be3ff8f2de2414815d47a3bffabab78e))
+
+
+### Bug Fixes
+
+* **adapters:** record a crawl that dies instead of leaving it queued ([73fb7e0](https://github.com/suiflex/websift/commit/73fb7e0e1928d6d957dc05e2f49c7c31b476ba50))
+* **adapters:** unblock web_crawl_start ([4c53ec9](https://github.com/suiflex/websift/commit/4c53ec9bd75e5e7e19227956f9fd2c0a2db0d984))
+* **crawl:** recheck robots after a redirect ([f7d0f1a](https://github.com/suiflex/websift/commit/f7d0f1a5acab829c45efb7a4c58159ad4f624c91))
+* **fetch:** follow redirects under the existing redirect guard ([2710c9d](https://github.com/suiflex/websift/commit/2710c9df3b0e1f460a2006ac488a4c00167ed802))
+* point the install commands at a branch that exists ([1be2ba8](https://github.com/suiflex/websift/commit/1be2ba899951b6081b97347f234894a1b5e63f8b))
+* **robots:** treat a missing robots.txt as permission ([00abeca](https://github.com/suiflex/websift/commit/00abeca5302b011142a87a15b141f636ee94d3db))
+* **storage:** wait out shared-cache table locks ([975ead2](https://github.com/suiflex/websift/commit/975ead2c20b7ec61aeb7d4ac45deb28f2136f800))
+* unblock crawling and give the repository its missing governance files ([3e3f1bf](https://github.com/suiflex/websift/commit/3e3f1bf613ea2bd946a227abd597f4fbf46a50b1))
+
 ## 0.2.2 — 2026-08-12
 
 ### Fixed
