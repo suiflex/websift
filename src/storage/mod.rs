@@ -164,8 +164,10 @@ fn is_busy(error: &StorageError) -> bool {
 /// Retry an operation that `SQLite` refused because another connection held a lock.
 ///
 /// `SQLite` does not always route a conflict to the busy handler: a lock upgrade that could
-/// deadlock is refused immediately. Opening a database is exactly when several processes collide,
-/// and waiting is always better than failing to start.
+/// deadlock is refused immediately, and a shared-cache database refuses a conflicting table lock
+/// with `SQLITE_LOCKED`, which `busy_timeout` does not cover at all. Opening a database is one
+/// place several processes collide; the other is a crawl worker writing on its own connection
+/// while the server reads the same tables. Both would rather wait than fail.
 fn retry_while_busy<T>(mut operation: impl FnMut() -> Result<T>) -> Result<T> {
     let mut last = operation();
     for attempt in 1..BUSY_ATTEMPTS {
@@ -282,17 +284,21 @@ impl CrawlJobs<'_> {
         idempotency_key: Option<&str>,
         created_at: &str,
     ) -> Result<bool> {
-        Ok(self.connection.execute("INSERT OR IGNORE INTO crawl_jobs (id, profile, request, idempotency_key, state, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'queued', ?5, ?5)", params![id, self.profile, request, idempotency_key, created_at])? == 1)
+        retry_while_busy(|| {
+            Ok(self.connection.execute("INSERT OR IGNORE INTO crawl_jobs (id, profile, request, idempotency_key, state, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'queued', ?5, ?5)", params![id, self.profile, request, idempotency_key, created_at])? == 1)
+        })
     }
     pub fn get_state(&self, id: &str) -> Result<Option<String>> {
-        Ok(self
-            .connection
-            .query_row(
-                "SELECT state FROM crawl_jobs WHERE id = ?1 AND profile = ?2",
-                params![id, self.profile],
-                |row| row.get(0),
-            )
-            .optional()?)
+        retry_while_busy(|| {
+            Ok(self
+                .connection
+                .query_row(
+                    "SELECT state FROM crawl_jobs WHERE id = ?1 AND profile = ?2",
+                    params![id, self.profile],
+                    |row| row.get(0),
+                )
+                .optional()?)
+        })
     }
     pub fn set_state(
         &self,
@@ -301,25 +307,32 @@ impl CrawlJobs<'_> {
         reason: Option<&str>,
         updated_at: &str,
     ) -> Result<bool> {
-        Ok(self.connection.execute(
-            "UPDATE crawl_jobs SET state = ?1, terminal_reason = ?2, updated_at = ?3 WHERE id = ?4 AND profile = ?5 AND (state NOT IN ('completed', 'failed', 'cancelled') OR state = ?1)",
-            params![state, reason, updated_at, id, self.profile],
-        )? == 1)
+        retry_while_busy(|| {
+            Ok(self.connection.execute(
+                "UPDATE crawl_jobs SET state = ?1, terminal_reason = ?2, updated_at = ?3 WHERE id = ?4 AND profile = ?5 AND (state NOT IN ('completed', 'failed', 'cancelled') OR state = ?1)",
+                params![state, reason, updated_at, id, self.profile],
+            )? == 1)
+        })
     }
     pub fn list(&self) -> Result<Vec<(String, String)>> {
-        let mut statement = self.connection.prepare(
-            "SELECT id, state FROM crawl_jobs WHERE profile = ?1 ORDER BY created_at, id",
-        )?;
-        let rows = statement.query_map([&self.profile], |row| Ok((row.get(0)?, row.get(1)?)))?;
-        rows.collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(Into::into)
+        retry_while_busy(|| {
+            let mut statement = self.connection.prepare(
+                "SELECT id, state FROM crawl_jobs WHERE profile = ?1 ORDER BY created_at, id",
+            )?;
+            let rows =
+                statement.query_map([&self.profile], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(Into::into)
+        })
     }
     pub fn count(&self) -> Result<i64> {
-        Ok(self.connection.query_row(
-            "SELECT COUNT(*) FROM crawl_jobs WHERE profile = ?1",
-            [&self.profile],
-            |row| row.get(0),
-        )?)
+        retry_while_busy(|| {
+            Ok(self.connection.query_row(
+                "SELECT COUNT(*) FROM crawl_jobs WHERE profile = ?1",
+                [&self.profile],
+                |row| row.get(0),
+            )?)
+        })
     }
 }
 
@@ -329,25 +342,33 @@ pub struct CrawlUrls<'a> {
 }
 impl CrawlUrls<'_> {
     pub fn add(&self, id: &str, job_id: &str, normalized_url: &str, depth: i64) -> Result<bool> {
-        Ok(self.connection.execute("INSERT OR IGNORE INTO crawl_urls (id, profile, job_id, normalized_url, depth, state) SELECT ?1, ?2, ?3, ?4, ?5, 'pending' WHERE EXISTS (SELECT 1 FROM crawl_jobs WHERE id = ?3 AND profile = ?2)", params![id, self.profile, job_id, normalized_url, depth])? == 1)
+        retry_while_busy(|| {
+            Ok(self.connection.execute("INSERT OR IGNORE INTO crawl_urls (id, profile, job_id, normalized_url, depth, state) SELECT ?1, ?2, ?3, ?4, ?5, 'pending' WHERE EXISTS (SELECT 1 FROM crawl_jobs WHERE id = ?3 AND profile = ?2)", params![id, self.profile, job_id, normalized_url, depth])? == 1)
+        })
     }
     pub fn count_for_job(&self, job_id: &str) -> Result<i64> {
-        Ok(self.connection.query_row(
-            "SELECT COUNT(*) FROM crawl_urls WHERE job_id = ?1 AND profile = ?2",
-            params![job_id, self.profile],
-            |row| row.get(0),
-        )?)
+        retry_while_busy(|| {
+            Ok(self.connection.query_row(
+                "SELECT COUNT(*) FROM crawl_urls WHERE job_id = ?1 AND profile = ?2",
+                params![job_id, self.profile],
+                |row| row.get(0),
+            )?)
+        })
     }
     pub fn pending(&self, job_id: &str, limit: usize) -> Result<Vec<(String, String, i64)>> {
-        let mut statement = self.connection.prepare("SELECT id, normalized_url, depth FROM crawl_urls WHERE job_id = ?1 AND profile = ?2 AND state = 'pending' ORDER BY depth, id LIMIT ?3")?;
-        let rows = statement.query_map(params![job_id, self.profile, limit as i64], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-        })?;
-        rows.collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(Into::into)
+        retry_while_busy(|| {
+            let mut statement = self.connection.prepare("SELECT id, normalized_url, depth FROM crawl_urls WHERE job_id = ?1 AND profile = ?2 AND state = 'pending' ORDER BY depth, id LIMIT ?3")?;
+            let rows = statement.query_map(params![job_id, self.profile, limit as i64], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(Into::into)
+        })
     }
     pub fn set_state(&self, id: &str, state: &str, error: Option<&str>) -> Result<bool> {
-        Ok(self.connection.execute("UPDATE crawl_urls SET state = ?1, error = ?2, attempts = attempts + 1 WHERE id = ?3 AND profile = ?4", params![state, error, id, self.profile])? == 1)
+        retry_while_busy(|| {
+            Ok(self.connection.execute("UPDATE crawl_urls SET state = ?1, error = ?2, attempts = attempts + 1 WHERE id = ?3 AND profile = ?4", params![state, error, id, self.profile])? == 1)
+        })
     }
 }
 
@@ -363,22 +384,28 @@ impl Documents<'_> {
         canonical_url: &str,
         content_hash: Option<&str>,
     ) -> Result<bool> {
-        Ok(self.connection.execute("INSERT OR IGNORE INTO documents (id, profile, job_id, canonical_url, content_hash) SELECT ?1, ?2, ?3, ?4, ?5 WHERE EXISTS (SELECT 1 FROM crawl_jobs WHERE id = ?3 AND profile = ?2)", params![id, self.profile, job_id, canonical_url, content_hash])? == 1)
+        retry_while_busy(|| {
+            Ok(self.connection.execute("INSERT OR IGNORE INTO documents (id, profile, job_id, canonical_url, content_hash) SELECT ?1, ?2, ?3, ?4, ?5 WHERE EXISTS (SELECT 1 FROM crawl_jobs WHERE id = ?3 AND profile = ?2)", params![id, self.profile, job_id, canonical_url, content_hash])? == 1)
+        })
     }
     pub fn count_for_job(&self, job_id: &str) -> Result<i64> {
-        Ok(self.connection.query_row(
-            "SELECT COUNT(*) FROM documents WHERE job_id = ?1 AND profile = ?2",
-            params![job_id, self.profile],
-            |row| row.get(0),
-        )?)
+        retry_while_busy(|| {
+            Ok(self.connection.query_row(
+                "SELECT COUNT(*) FROM documents WHERE job_id = ?1 AND profile = ?2",
+                params![job_id, self.profile],
+                |row| row.get(0),
+            )?)
+        })
     }
     pub fn list_for_job(&self, job_id: &str) -> Result<Vec<String>> {
-        let mut statement = self.connection.prepare(
-            "SELECT canonical_url FROM documents WHERE job_id = ?1 AND profile = ?2 ORDER BY id",
-        )?;
-        let rows = statement.query_map(params![job_id, self.profile], |row| row.get(0))?;
-        rows.collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(Into::into)
+        retry_while_busy(|| {
+            let mut statement = self.connection.prepare(
+                "SELECT canonical_url FROM documents WHERE job_id = ?1 AND profile = ?2 ORDER BY id",
+            )?;
+            let rows = statement.query_map(params![job_id, self.profile], |row| row.get(0))?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(Into::into)
+        })
     }
 }
 
@@ -483,6 +510,49 @@ impl Artifacts<'_> {
 #[cfg(test)]
 mod tests {
     use super::Store;
+
+    // A crawl worker writes on its own connection while the server reads the same tables from the
+    // main one. Shared-cache SQLite refuses that with SQLITE_LOCKED instead of routing it to the
+    // busy handler, so without a retry the worker's very first state write can be rejected and
+    // the job sits in its starting state forever.
+    #[test]
+    fn a_worker_connection_can_write_while_the_main_connection_reads() {
+        use std::sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        let main = Arc::new(Mutex::new(Store::open_in_memory().unwrap()));
+        let worker = main.lock().unwrap().open_worker_store().unwrap();
+        main.lock()
+            .unwrap()
+            .crawl_jobs("p")
+            .create("j", "{}", None, "now")
+            .unwrap();
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let reader = {
+            let main = Arc::clone(&main);
+            let stop = Arc::clone(&stop);
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    main.lock().unwrap().crawl_jobs("p").get_state("j").unwrap();
+                }
+            })
+        };
+        let writes = (0..2_000).map(|attempt| {
+            let state = if attempt % 2 == 0 {
+                "running"
+            } else {
+                "queued"
+            };
+            worker.crawl_jobs("p").set_state("j", state, None, "now")
+        });
+        let failures = writes.filter(Result::is_err).count();
+        stop.store(true, Ordering::Relaxed);
+        reader.join().unwrap();
+        assert_eq!(failures, 0, "worker writes were refused while reads ran");
+    }
 
     #[test]
     fn configures_sqlite_and_applies_schema() {
