@@ -13,7 +13,7 @@ Keep it accurate when behavior changes.
 
 | Path | Responsibility |
 | --- | --- |
-| `src/main.rs` | CLI: `mcp`, `status`, `setup --lite`, `doctor`, `update` |
+| `src/main.rs` | CLI: `mcp`, `status`, `setup`, `setup --lite`, `doctor`, `update` |
 | `src/adapters/` | MCP boundary. Parameter validation, stable error codes, tool registration |
 | `src/application/` | Transport-independent operations. `RuntimeStatus` validates the profile |
 | `src/research/` | `deep_search`: plan queries, search concurrently, dedupe, rank, fetch top candidates |
@@ -23,6 +23,7 @@ Keep it accurate when behavior changes.
 | `src/robots.rs` | The shared robots gate: cache, unavailable-origin memory, per-host delay schedule |
 | `src/storage/` | Embedded SQLite, ordered migrations, profile-scoped repositories |
 | `src/worker/` | JSONL supervisor for the browser worker |
+| `src/setup.rs` | `websift setup`: interactive/flag-driven MCP client registration |
 | `src/update.rs` | Self-update against published releases, checksum-verified |
 | `browser-worker/` | Node worker implementing protocol v1 (see status below) |
 

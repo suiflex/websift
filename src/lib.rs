@@ -13,6 +13,7 @@ pub mod observe;
 pub mod policy;
 pub mod research;
 pub mod robots;
+pub mod setup;
 pub mod storage;
 #[cfg(test)]
 pub(crate) mod testing;
