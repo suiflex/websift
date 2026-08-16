@@ -90,8 +90,8 @@ One command, once:
 websift setup
 ```
 
-It asks which client to register with and which profile to use, shows exactly what it will
-change, and writes only after you confirm. The binary is recorded by absolute path, because a
+It asks which clients to register with (select as many as you like) and which profile to use,
+shows exactly what it will change, and writes only after you confirm. The binary is recorded by absolute path, because a
 desktop harness usually does not inherit your shell `PATH`.
 
 For scripts, name the client instead:

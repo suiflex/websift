@@ -173,6 +173,185 @@ struct ServerSpec {
 ///
 /// Returns an error when the client's configuration cannot be read or written, when an entry
 /// already exists and `--force` was not given, when a delegated client CLI fails, or when the
+/// picker is needed but stdin is not a terminal./// Terminal branding: ANSI colors, banner, and bordered panels.
+///
+/// Stdlib only — no `owo-colors`, no `console`. Colors are 256-color approximations of the
+/// suitest palette so the two CLIs read as one product, and everything collapses to plain text
+/// when stdout is not a terminal or `NO_COLOR` is set.
+mod theme {
+    use std::io::IsTerminal;
+
+    use inquire::ui::{Attributes, Color, RenderConfig, StyleSheet, Styled};
+
+    pub(super) const ACCENT: &str = "\x1b[38;5;114m"; // #4ade80
+    pub(super) const RED: &str = "\x1b[38;5;210m"; // #f87171
+    pub(super) const AMBER: &str = "\x1b[38;5;221m"; // #fbbf24
+    pub(super) const VIOLET: &str = "\x1b[38;5;146m"; // #a78bfa
+    const BOLD_FG: &str = "\x1b[1;38;5;255m"; // #fafafa
+    const RESET: &str = "\x1b[0m";
+
+    fn enabled() -> bool {
+        std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none()
+    }
+
+    fn paint(color: &str, text: &str) -> String {
+        if enabled() {
+            format!("{color}{text}{RESET}")
+        } else {
+            text.to_owned()
+        }
+    }
+
+    /// Boxed wordmark. The icon is an outlined mini-box holding a funnel — websift sifts the web
+    /// down to what was asked for. Box-drawing characters, not filled blocks, which render as a
+    /// solid blob at small sizes.
+    pub(super) fn banner() -> String {
+        let rows = ["┌───┐", "│ ▽ │  W E B S I F T", "└───┘"];
+        let width = rows
+            .iter()
+            .map(|row| row.chars().count())
+            .max()
+            .unwrap_or(0)
+            + 4;
+        let mut out = vec![format!("┌{}┐", "─".repeat(width))];
+        for row in rows {
+            let pad = width - 4 - row.chars().count();
+            out.push(format!("│  {row}{}  │", " ".repeat(pad)));
+        }
+        out.push(format!("└{}┘", "─".repeat(width)));
+        paint(ACCENT, &out.join("\n"))
+    }
+
+    /// A row that sits on the connector column, marker at column zero.
+    pub(super) fn point(text: &str, color: &str) -> String {
+        paint(color, &format!("◇ {text}"))
+    }
+
+    /// One step of the flow: a labeled rule, then body lines under a shared gutter.
+    pub(super) fn step(label: &str, lines: &[String], color: &str) -> String {
+        let rule = "─".repeat(30usize.saturating_sub(label.len()).max(3));
+        let mut out = vec![point(&format!("{label} {rule}"), color), gutter("", color)];
+        for line in lines {
+            out.push(gutter(&paint(BOLD_FG, line), color));
+        }
+        out.push(gutter("", color));
+        out.join("\n")
+    }
+
+    fn gutter(text: &str, color: &str) -> String {
+        let bar = paint(color, "│");
+        if text.is_empty() {
+            bar
+        } else {
+            format!("{bar} {text}")
+        }
+    }
+
+    /// Bordered panel around a block of lines.
+    pub(super) fn panel(lines: &[String], title: &str, color: &str) -> String {
+        let width = lines
+            .iter()
+            .map(|line| line.chars().count())
+            .chain(std::iter::once(title.chars().count()))
+            .max()
+            .unwrap_or(0)
+            .max(20);
+        let mut out = vec![paint(
+            color,
+            &format!(
+                "┌─ {title} {}┐",
+                "─".repeat((width + 2).saturating_sub(title.chars().count() + 3))
+            ),
+        )];
+        for line in lines {
+            let pad = " ".repeat(width - line.chars().count());
+            out.push(format!(
+                "{} {}{pad} {}",
+                paint(color, "│"),
+                paint(BOLD_FG, line),
+                paint(color, "│")
+            ));
+        }
+        out.push(paint(color, &format!("└{}┘", "─".repeat(width + 2))));
+        out.join("\n")
+    }
+
+    /// Bind the prompt widgets to the same accent the rest of the flow uses.
+    pub(super) fn render_config() -> RenderConfig<'static> {
+        if !enabled() {
+            return RenderConfig::empty();
+        }
+        let accent = Color::LightGreen;
+        RenderConfig::default()
+            .with_prompt_prefix(Styled::new("◇").with_fg(accent))
+            .with_answered_prompt_prefix(Styled::new("◇").with_fg(accent))
+            .with_highlighted_option_prefix(Styled::new("›").with_fg(accent))
+            .with_selected_checkbox(Styled::new("◼").with_fg(accent))
+            .with_unselected_checkbox(Styled::new("◻").with_fg(Color::DarkGrey))
+            .with_answer(StyleSheet::new().with_fg(accent))
+            .with_help_message(StyleSheet::new().with_fg(Color::DarkGrey))
+            .with_option(StyleSheet::empty())
+            .with_selected_option(Some(
+                StyleSheet::new()
+                    .with_fg(accent)
+                    .with_attr(Attributes::BOLD),
+            ))
+    }
+}
+
+/// What one client installation will do, decided before anything is written so the preview and
+/// the write share a single source of truth.
+enum Plan {
+    File {
+        path: PathBuf,
+        key: &'static str,
+        entry: Value,
+        existing: bool,
+    },
+    Delegated {
+        steps: Vec<Vec<String>>,
+    },
+    Snippet,
+}
+
+/// A resolved installation: the client, its plan, and the snippet describing the entry.
+struct Installation {
+    client: Client,
+    plan: Plan,
+    snippet: Value,
+}
+
+impl Installation {
+    /// The lines shown in the preview, and by `--dry-run`.
+    fn lines(&self) -> Vec<String> {
+        match &self.plan {
+            Plan::File {
+                path,
+                key,
+                existing,
+                ..
+            } => {
+                let verb = if *existing { "replace" } else { "add" };
+                vec![
+                    format!("{verb} '{key}' entry"),
+                    format!("in {}", path.display()),
+                ]
+            }
+            Plan::Delegated { steps } => steps
+                .iter()
+                .map(|step| format!("$ {}", shell_join(step)))
+                .collect(),
+            Plan::Snippet => vec!["print a snippet; no file is written".to_owned()],
+        }
+    }
+}
+
+/// Register the binary with the named clients, or run the interactive picker when none was named.
+///
+/// # Errors
+///
+/// Returns an error when a client's configuration cannot be read or written, when an entry
+/// already exists and `--force` was not given, when a delegated client CLI fails, or when the
 /// picker is needed but stdin is not a terminal.
 pub fn run(options: &SetupOptions) -> Result<(), Box<dyn Error>> {
     match options.client {
@@ -181,33 +360,64 @@ pub fn run(options: &SetupOptions) -> Result<(), Box<dyn Error>> {
                 .profile
                 .clone()
                 .unwrap_or_else(|| "default".to_owned());
-            install(client, &profile, options)
+            let installation = resolve(client, &profile, options)?;
+            if options.print {
+                println!("{}", serde_json::to_string_pretty(&installation.snippet)?);
+            }
+            for line in installation.lines() {
+                println!("{}: {line}", client.id());
+            }
+            if options.dry_run {
+                return Ok(());
+            }
+            apply(&installation, options)
         }
         None => run_interactive(options),
     }
 }
 
 fn run_interactive(options: &SetupOptions) -> Result<(), Box<dyn Error>> {
-    use inquire::{Confirm, Select, Text};
+    use inquire::{Confirm, MultiSelect, Text};
 
     if !std::io::stdin().is_terminal() {
         return Err("setup needs a terminal; pass --client <id> to run non-interactively".into());
     }
 
-    println!("websift setup — register this binary as an MCP server");
-    println!("────────────────────────────────────────────────────");
+    println!("{}\n", theme::banner());
+
     match resolve_command(options.command.as_deref()) {
-        Ok(path) => println!("[ok]   binary: {path}"),
+        Ok(command) => {
+            println!(
+                "{}\n",
+                theme::step(
+                    "setup — preflight",
+                    &[format!("[ok]   binary: {command}")],
+                    theme::ACCENT,
+                )
+            );
+        }
         Err(error) => {
-            println!("[fail] binary: {error}");
+            println!(
+                "{}\n",
+                theme::step(
+                    "setup — preflight",
+                    &[format!("[fail] {error}")],
+                    theme::RED
+                )
+            );
             return Err(error.into());
         }
     }
-    println!();
 
-    let client = Select::new("Which client?", Client::ALL.to_vec())
+    let clients = MultiSelect::new("Which clients?", Client::ALL.to_vec())
         .with_page_size(12)
+        .with_help_message("↑↓ move · space toggle · → all · ← none · enter confirm")
+        .with_render_config(theme::render_config())
         .prompt()?;
+    if clients.is_empty() {
+        println!("{}", theme::point("nothing selected", theme::AMBER));
+        return Ok(());
+    }
 
     let default_profile = options
         .profile
@@ -216,22 +426,54 @@ fn run_interactive(options: &SetupOptions) -> Result<(), Box<dyn Error>> {
     let profile = Text::new("Profile:")
         .with_default(&default_profile)
         .with_help_message("isolation namespace: its own database, crawl jobs, and page cache")
+        .with_render_config(theme::render_config())
         .prompt()?;
     let profile = normalize_profile(&profile)?;
 
-    println!();
-    let mut preview = options.clone();
-    preview.dry_run = true;
-    preview.print = true;
-    install(client, &profile, &preview)?;
-    println!();
+    // Confirming a preview that says "replace" is the consent `--force` asks for on the flag path.
+    let confirmed = SetupOptions {
+        force: true,
+        ..options.clone()
+    };
 
-    if !Confirm::new("Apply this?").with_default(false).prompt()? {
-        println!("nothing written");
+    let mut installations = Vec::with_capacity(clients.len());
+    for client in clients {
+        installations.push(resolve(client, &profile, &confirmed)?);
+    }
+
+    let mut body = Vec::new();
+    for installation in &installations {
+        body.push(format!("{}:", installation.client.id()));
+        for line in installation.lines() {
+            body.push(format!("  {line}"));
+        }
+    }
+    println!(
+        "\n{}\n",
+        theme::panel(&body, "planned changes", theme::VIOLET)
+    );
+
+    if !Confirm::new("Apply this?")
+        .with_default(false)
+        .with_render_config(theme::render_config())
+        .prompt()?
+    {
+        println!("{}", theme::point("nothing written", theme::AMBER));
         return Ok(());
     }
 
-    install(client, &profile, options)
+    println!();
+    for installation in &installations {
+        apply(installation, &confirmed)?;
+    }
+    println!(
+        "\n{}",
+        theme::point(
+            "done — restart the client to pick up the new server",
+            theme::ACCENT
+        )
+    );
+    Ok(())
 }
 
 fn normalize_profile(profile: &str) -> Result<String, String> {
@@ -253,87 +495,94 @@ fn normalize_profile(profile: &str) -> Result<String, String> {
     }
 }
 
-fn install(client: Client, profile: &str, options: &SetupOptions) -> Result<(), Box<dyn Error>> {
+/// Decide what will happen without touching anything.
+fn resolve(
+    client: Client,
+    profile: &str,
+    options: &SetupOptions,
+) -> Result<Installation, Box<dyn Error>> {
     let command = resolve_command(options.command.as_deref())?;
     let spec = server_spec(client, &options.name, &command, profile);
 
-    match describe(client, options.config.as_deref())? {
-        ClientDescriptor::SnippetOnly => {
-            println!("{}", serde_json::to_string_pretty(&spec.snippet)?);
-            Ok(())
-        }
-        ClientDescriptor::Delegated { program } => {
-            let steps = delegated_steps(
+    let plan = match describe(client, options.config.as_deref())? {
+        ClientDescriptor::SnippetOnly => Plan::Snippet,
+        ClientDescriptor::Delegated { program } => Plan::Delegated {
+            steps: delegated_steps(
                 client,
                 program,
                 &options.name,
                 &command,
                 profile,
                 options.force,
-            );
-            if options.print || options.dry_run {
-                for step in &steps {
-                    println!("$ {}", shell_join(step));
-                }
-            }
-            if options.dry_run {
-                return Ok(());
-            }
-            for step in &steps {
-                run_step(step)?;
-            }
-            println!("{}: registered '{}'", client.id(), options.name);
-            Ok(())
-        }
+            ),
+        },
         ClientDescriptor::FileTarget { path, key } => {
-            install_into_file(client, &path, key, &spec, options)
+            // Reading now surfaces an unparsable or wrongly-shaped configuration in the preview,
+            // before the user is asked to approve a write that would fail anyway.
+            let mut root = load_json_object(&path)?;
+            let servers = ensure_object_field(&mut root, key)
+                .map_err(|error| format!("{}: {error}", path.display()))?;
+            let existing = servers.contains_key(&options.name);
+            if existing && !options.force {
+                return Err(format!(
+                    "{}: '{}' already exists in {key}; pass --force to replace it",
+                    path.display(),
+                    options.name
+                )
+                .into());
+            }
+            Plan::File {
+                path,
+                key,
+                entry: spec.entry,
+                existing,
+            }
         }
-    }
+    };
+
+    Ok(Installation {
+        client,
+        plan,
+        snippet: spec.snippet,
+    })
 }
 
-fn install_into_file(
-    client: Client,
-    path: &Path,
-    key: &'static str,
-    spec: &ServerSpec,
-    options: &SetupOptions,
-) -> Result<(), Box<dyn Error>> {
-    let mut root = load_json_object(path)?;
-    let servers = ensure_object_field(&mut root, key)
-        .map_err(|error| format!("{}: {error}", path.display()))?;
-
-    let existing = servers.contains_key(&options.name);
-    if existing && !options.force {
-        return Err(format!(
-            "{}: '{}' already exists in {}; pass --force to replace it",
-            path.display(),
-            options.name,
-            key
-        )
-        .into());
+fn apply(installation: &Installation, options: &SetupOptions) -> Result<(), Box<dyn Error>> {
+    match &installation.plan {
+        Plan::Snippet => {
+            println!("{}", serde_json::to_string_pretty(&installation.snippet)?);
+            Ok(())
+        }
+        Plan::Delegated { steps } => {
+            for step in steps {
+                run_step(step)?;
+            }
+            println!(
+                "{}",
+                theme::point(
+                    &format!(
+                        "{}: registered '{}'",
+                        installation.client.id(),
+                        options.name
+                    ),
+                    theme::ACCENT
+                )
+            );
+            Ok(())
+        }
+        Plan::File {
+            path, key, entry, ..
+        } => {
+            // Re-read rather than carrying the parsed document from `resolve`: the preview and the
+            // confirmation are separated by user input, and the file may have changed underneath.
+            let mut root = load_json_object(path)?;
+            let servers = ensure_object_field(&mut root, key)
+                .map_err(|error| format!("{}: {error}", path.display()))?;
+            servers.insert(options.name.clone(), entry.clone());
+            backup_if_exists(path)?;
+            write_json_object(path, &root)
+        }
     }
-
-    if options.print {
-        println!("{}", serde_json::to_string_pretty(&spec.snippet)?);
-    }
-
-    let verb = if existing { "replace" } else { "add" };
-    println!(
-        "{}: {verb} '{}' in {} of {}",
-        client.id(),
-        options.name,
-        key,
-        path.display()
-    );
-
-    if options.dry_run {
-        return Ok(());
-    }
-
-    servers.insert(options.name.clone(), spec.entry.clone());
-    backup_if_exists(path)?;
-    write_json_object(path, &root)?;
-    Ok(())
 }
 
 fn server_spec(client: Client, name: &str, command: &str, profile: &str) -> ServerSpec {
@@ -1000,6 +1249,47 @@ mod tests {
         assert!(normalize_profile("../etc").is_err());
         assert!(normalize_profile("").is_err());
         assert!(normalize_profile(&"a".repeat(65)).is_err());
+    }
+
+    #[test]
+    fn branding_collapses_to_plain_text_when_stdout_is_not_a_terminal() {
+        // Under `cargo test` stdout is a pipe, which is exactly the redirected case.
+        let banner = theme::banner();
+        assert!(!banner.contains('\x1b'), "{banner:?}");
+        assert!(banner.contains("W E B S I F T"));
+    }
+
+    #[test]
+    fn a_panel_pads_every_row_to_the_width_of_the_widest_line() {
+        let panel = theme::panel(
+            &["short".to_owned(), "a much longer line".to_owned()],
+            "planned changes",
+            theme::ACCENT,
+        );
+        let widths: Vec<usize> = panel.lines().map(|line| line.chars().count()).collect();
+        assert!(
+            widths.windows(2).all(|pair| pair[0] == pair[1]),
+            "{widths:?}"
+        );
+    }
+
+    #[test]
+    fn the_preview_lines_name_the_file_and_whether_the_entry_is_replaced() {
+        let dir = TempDir::new("lines");
+        let path = dir.join("claude.json");
+        fs::write(&path, r#"{"mcpServers":{"websift":{"command":"stale"}}}"#).expect("seed");
+
+        let forced = SetupOptions {
+            client: Some(Client::ClaudeCode),
+            config: Some(path.clone()),
+            force: true,
+            ..options("websift")
+        };
+        let installation = resolve(Client::ClaudeCode, "default", &forced).expect("resolve");
+
+        let lines = installation.lines();
+        assert!(lines[0].starts_with("replace"), "{lines:?}");
+        assert!(lines[1].contains("claude.json"), "{lines:?}");
     }
 
     #[test]
