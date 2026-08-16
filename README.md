@@ -84,13 +84,42 @@ nor administrator rights.
 
 ### Register it with your harness
 
-One command, once. Use the absolute path the installer prints: a desktop harness often does not
-inherit your shell `PATH`.
+One command, once:
 
 ```sh
-claude mcp add --scope user websift -- ~/.local/bin/websift mcp --profile claude-code
-codex mcp add websift -- ~/.local/bin/websift mcp --profile codex
+websift setup
 ```
+
+It asks which client to register with and which profile to use, shows exactly what it will
+change, and writes only after you confirm. The binary is recorded by absolute path, because a
+desktop harness usually does not inherit your shell `PATH`.
+
+For scripts, name the client instead:
+
+```sh
+websift setup --client claude-code --profile claude-code
+websift setup --client codex --profile codex --dry-run   # preview, changes nothing
+```
+
+| `--client` | Where the entry goes |
+| --- | --- |
+| `claude-code` | `~/.claude.json` |
+| `claude-code-cli` | runs `claude mcp add --scope user` |
+| `claude-desktop` | `claude_desktop_config.json` in the platform support directory |
+| `codex` | runs `codex mcp add` |
+| `cursor` | `~/.cursor/mcp.json` |
+| `vscode` | runs `code --add-mcp` (GitHub Copilot) |
+| `gemini-cli` | runs `gemini mcp add -s user` |
+| `copilot-cli` | `~/.copilot/mcp-config.json` |
+| `opencode` | `~/.config/opencode/opencode.jsonc` |
+| `windsurf` | `~/.codeium/windsurf/mcp_config.json` (provisional path) |
+| `zed` | `~/.config/zed/settings.json` (provisional path) |
+| `generic-json` | prints a portable snippet, writes nothing |
+
+Other flags: `--name` renames the MCP entry, `--command` points at a different binary, `--config`
+overrides the client's configuration path, `--print` shows the JSON snippet, and `--force`
+replaces an entry that already exists. Any file it rewrites is copied to `<path>.bak` first, and
+a configuration it cannot parse is reported rather than replaced.
 
 Then confirm the installation:
 
