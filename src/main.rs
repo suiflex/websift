@@ -6,15 +6,19 @@ use websift::{
     adapters::McpServer,
     application::RuntimeStatus,
     config::{BrowserMode, Config},
+    setup::{Client, SetupOptions},
     update::{Updater, replace_executable},
 };
 
 const USAGE: &str = "usage: websift <mcp|status|setup|doctor|update> [options]";
+const SETUP_USAGE: &str = "usage: websift setup [--client ID] [--profile NAME] [--name NAME] \
+[--command PATH] [--config PATH] [--dry-run] [--print] [--force]";
 
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
     Mcp { profile: Option<String>, lite: bool },
     Status,
+    Setup(Box<SetupOptions>),
     SetupLite,
     Doctor,
     Update { check_only: bool },
@@ -69,6 +73,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
             let config = Config::from_env()?;
             print_status(&config)?;
         }
+        Command::Setup(options) => websift::setup::run(&options)?,
         Command::SetupLite => print_setup_lite(Config::from_env()?)?,
         Command::Doctor => print_doctor(Config::from_env()?)?,
         Command::Update { check_only } => run_update(check_only).await?,
@@ -151,13 +156,7 @@ fn parse_command(args: impl IntoIterator<Item = String>) -> Result<Command, &'st
         }
         Some("status") if args.next().is_none() => Ok(Command::Status),
         Some("doctor") if args.next().is_none() => Ok(Command::Doctor),
-        Some("setup") => match (args.next().as_deref(), args.next()) {
-            (Some("--lite"), None) => Ok(Command::SetupLite),
-            (None, None) => {
-                Err("unsupported: full setup requires an installer and Chromium package")
-            }
-            _ => Err(USAGE),
-        },
+        Some("setup") => parse_setup(args),
         Some("update") => match (args.next().as_deref(), args.next()) {
             (None, None) => Ok(Command::Update { check_only: false }),
             (Some("--check"), None) => Ok(Command::Update { check_only: true }),
@@ -168,6 +167,47 @@ fn parse_command(args: impl IntoIterator<Item = String>) -> Result<Command, &'st
         }
         _ => Err(USAGE),
     }
+}
+
+/// `setup --lite` keeps its configuration-only JSON contract; every other form builds a
+/// [`SetupOptions`] for the client installer.
+fn parse_setup(args: impl Iterator<Item = String>) -> Result<Command, &'static str> {
+    let mut args = args.peekable();
+    if args.peek().map(String::as_str) == Some("--lite") {
+        args.next();
+        return if args.next().is_none() {
+            Ok(Command::SetupLite)
+        } else {
+            Err(SETUP_USAGE)
+        };
+    }
+
+    let mut options = SetupOptions::default();
+    while let Some(arg) = args.next() {
+        let mut value = |flag: &'static str| args.next().ok_or(flag);
+        match arg.as_str() {
+            "--client" if options.client.is_none() => {
+                let id = value("--client requires ID")?;
+                options.client = Some(Client::parse(&id).map_err(|_| "unknown --client ID")?);
+            }
+            "--profile" if options.profile.is_none() => {
+                options.profile = Some(value("--profile requires NAME")?);
+            }
+            "--name" => options.name = value("--name requires NAME")?,
+            "--command" if options.command.is_none() => {
+                options.command = Some(value("--command requires PATH")?);
+            }
+            "--config" if options.config.is_none() => {
+                options.config = Some(value("--config requires PATH")?.into());
+            }
+            "--dry-run" if !options.dry_run => options.dry_run = true,
+            "--print" if !options.print => options.print = true,
+            "--force" if !options.force => options.force = true,
+            _ => return Err(SETUP_USAGE),
+        }
+    }
+
+    Ok(Command::Setup(Box::new(options)))
 }
 
 fn print_status(config: &Config) -> Result<(), Box<dyn Error>> {
@@ -254,6 +294,65 @@ fn print_doctor(config: Config) -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::{Command, parse_command};
+    use websift::setup::Client;
+
+    fn setup(args: &[&str]) -> Result<websift::setup::SetupOptions, &'static str> {
+        let args = std::iter::once("setup".to_owned()).chain(args.iter().map(|a| (*a).to_owned()));
+        match parse_command(args)? {
+            Command::Setup(options) => Ok(*options),
+            other => panic!("expected Setup, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn setup_without_arguments_selects_the_interactive_installer() {
+        let options = setup(&[]).expect("parse");
+        assert_eq!(options.client, None);
+        assert_eq!(options.name, "websift");
+    }
+
+    #[test]
+    fn setup_lite_still_parses_to_the_configuration_only_command() {
+        assert_eq!(
+            parse_command(["setup".into(), "--lite".into()]),
+            Ok(Command::SetupLite)
+        );
+        assert!(parse_command(["setup".into(), "--lite".into(), "--force".into()]).is_err());
+    }
+
+    #[test]
+    fn setup_accepts_every_installer_flag() {
+        let options = setup(&[
+            "--client",
+            "codex",
+            "--profile",
+            "work",
+            "--name",
+            "ws",
+            "--command",
+            "/bin/ws",
+            "--config",
+            "/tmp/c.json",
+            "--dry-run",
+            "--print",
+            "--force",
+        ])
+        .expect("parse");
+        assert_eq!(options.client, Some(Client::Codex));
+        assert_eq!(options.profile.as_deref(), Some("work"));
+        assert_eq!(options.name, "ws");
+        assert_eq!(options.command.as_deref(), Some("/bin/ws"));
+        assert_eq!(options.config, Some("/tmp/c.json".into()));
+        assert!(options.dry_run && options.print && options.force);
+    }
+
+    #[test]
+    fn setup_rejects_an_unknown_client_and_a_flag_missing_its_value() {
+        assert!(setup(&["--client", "emacs"]).is_err());
+        assert!(setup(&["--client"]).is_err());
+        assert!(setup(&["--profile"]).is_err());
+        assert!(setup(&["--nope"]).is_err());
+    }
 
     #[test]
     fn parses_supported_commands_and_options() {
@@ -287,11 +386,6 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_or_ambiguous_commands() {
-        assert!(
-            parse_command(["setup".into()])
-                .unwrap_err()
-                .starts_with("unsupported:")
-        );
         assert!(
             parse_command(["install".into(), "codex".into()])
                 .unwrap_err()

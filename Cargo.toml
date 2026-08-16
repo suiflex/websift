@@ -23,6 +23,7 @@ name = "websift"
 
 [dependencies]
 futures-util = "0.3.31"
+inquire = { version = "0.9.1", default-features = false, features = ["crossterm"] }
 reqwest = { version = "0.12.23", default-features = false, features = ["rustls-tls", "stream"] }
 scraper = "0.23.1"
 rmcp = { version = "3.1.2", default-features = false, features = ["macros", "server", "transport-io"] }
