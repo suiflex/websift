@@ -3,6 +3,15 @@
 Notable changes per release. Versions follow semantic versioning; the release tag is the version
 prefixed with `v`, which is also the tag `websift update` compares against.
 
+## [0.4.0](https://github.com/suiflex/websift/compare/v0.3.0...v0.4.0) (2026-08-16)
+
+
+### Features
+
+* brand the setup wizard and let it install several clients at once ([f91f0cf](https://github.com/suiflex/websift/commit/f91f0cf84de880c6e2f5abcd3c3cde1629b7937e))
+* register websift with MCP clients via `websift setup` ([3af2237](https://github.com/suiflex/websift/commit/3af2237df7f04b71fd795bf8d2dbe8a4f9333fc7))
+* register websift with MCP clients via websift setup ([40b9b01](https://github.com/suiflex/websift/commit/40b9b012b421d0e05eed1ae8b0c08ff1d880d4c0))
+
 ## [0.3.0](https://github.com/suiflex/websift/compare/v0.2.2...v0.3.0) (2026-08-14)
 
 
