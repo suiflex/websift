@@ -1,26 +1,10 @@
-# Review owners. The last matching pattern wins, so specific paths go below the default.
+# Default owner for everything in this repo.
+# See https://docs.github.com/articles/about-code-owners
 #
-# Every owner here must be a team that exists in the suiflex org and has write access to this
-# repository. GitHub does not report an unresolvable owner: it silently requests no review, so a
-# broken file looks exactly like a working one. Check with:
+# The owner must be a team that exists in the suiflex org and has write access to this
+# repository. GitHub does not report an unresolvable owner: it silently requests no
+# review, so a broken file looks exactly like a working one. Check with:
 #
 #   gh api repos/suiflex/websift/codeowners/errors
 
-# Default owner for everything.
-*                       @suiflex/maintener
-
-# Retrieval policy and the robots gate carry the invariants documented in CLAUDE.md.
-/src/policy/            @suiflex/maintener
-/src/robots.rs          @suiflex/maintener
-/src/fetch/             @suiflex/maintener
-
-# Release, distribution, and self-update paths.
-/.github/workflows/     @suiflex/maintener
-/install.sh             @suiflex/maintener
-/install.ps1            @suiflex/maintener
-/src/update.rs          @suiflex/maintener
-
-# Project governance.
-/SECURITY.md            @suiflex/maintener
-/CODE_OF_CONDUCT.md     @suiflex/maintener
-/LICENSE                @suiflex/maintener
+* @suiflex/maintainers
