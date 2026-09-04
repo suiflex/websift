@@ -1200,6 +1200,12 @@ fn stable_fetch_error(error: &FetchError) -> String {
     }
 }
 
+// The rmcp `tool_handler` macro expands `call_tool` and `list_tools` as async
+// trait methods, and clippy 1.98's `unused_async_trait_impl` fires on the
+// generated `list_tools`, whose body never awaits. The async signature comes
+// from the `ServerHandler` trait, so the generated code cannot drop it —
+// silence the lint at the expansion site rather than upstream.
+#[allow(clippy::unused_async_trait_impl)]
 #[tool_handler]
 impl ServerHandler for McpServer {
     fn get_info(&self) -> ServerInfo {
