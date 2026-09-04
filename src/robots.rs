@@ -39,6 +39,15 @@ pub enum RobotsFetchError {
     Unreadable,
 }
 
+/// Why `rules_for` could not return rules. `Unreadable` covers the fetch
+/// failures; `Poisoned` means a mutex was left held by a panicked thread,
+/// which denies the origin the same way an unreadable document does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RobotsError {
+    Unreadable,
+    Poisoned,
+}
+
 type RobotsFetchFuture = Pin<Box<dyn Future<Output = Result<String, RobotsFetchError>> + Send>>;
 /// Fetches one `robots.txt` document. Injectable so tests never touch the network.
 pub type RobotsFetcher = Arc<dyn Fn(String) -> RobotsFetchFuture + Send + Sync>;
@@ -111,13 +120,25 @@ impl RobotsGate {
     ///
     /// # Errors
     ///
-    /// Returns `Err(())` when the document cannot be read; callers must treat that as a denial.
-    pub async fn rules_for(&self, origin: &str) -> Result<RobotsRules, ()> {
-        if let Some(rules) = self.cache.lock().map_err(|_| ())?.get(origin).cloned() {
+    /// Returns `Err(RobotsError::Unreadable)` when the document cannot be read; callers must
+    /// treat that as a denial.
+    pub async fn rules_for(&self, origin: &str) -> Result<RobotsRules, RobotsError> {
+        if let Some(rules) = self
+            .cache
+            .lock()
+            .map_err(|_| RobotsError::Poisoned)?
+            .get(origin)
+            .cloned()
+        {
             return Ok(rules);
         }
-        if self.unavailable.lock().map_err(|_| ())?.contains(origin) {
-            return Err(());
+        if self
+            .unavailable
+            .lock()
+            .map_err(|_| RobotsError::Poisoned)?
+            .contains(origin)
+        {
+            return Err(RobotsError::Unreadable);
         }
         let robots_url = format!("{origin}/robots.txt");
         let document = match (self.fetcher)(robots_url).await {
@@ -128,15 +149,15 @@ impl RobotsGate {
             Err(RobotsFetchError::Unreadable) => {
                 self.unavailable
                     .lock()
-                    .map_err(|_| ())?
+                    .map_err(|_| RobotsError::Poisoned)?
                     .insert(origin.to_owned());
-                return Err(());
+                return Err(RobotsError::Unreadable);
             }
         };
         let rules = RobotsRules::parse(&document, ROBOTS_MAX_BYTES);
         self.cache
             .lock()
-            .map_err(|_| ())?
+            .map_err(|_| RobotsError::Poisoned)?
             .insert(origin.to_owned(), rules.clone());
         Ok(rules)
     }
