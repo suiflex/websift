@@ -1,0 +1,17 @@
+# Marks authorship and conventional-commit types the same way every repository
+# in the organization does, by calling the shared workflow. Changing that
+# behavior happens upstream, once, not here.
+name: PR Triage
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+
+jobs:
+  triage:
+    # Forks of this repository should not try to run the organization's bot.
+    if: github.repository_owner == 'suiflex'
+    uses: suiflex/.github/.github/workflows/pr-triage.yml@main
+    secrets:
+      app_id: ${{ secrets.SUIFLEX_BOT_APP_ID }}
+      private_key: ${{ secrets.SUIFLEX_BOT_PRIVATE_KEY }}
