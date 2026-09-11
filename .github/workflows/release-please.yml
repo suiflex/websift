@@ -36,8 +36,64 @@ jobs:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
 
       - uses: googleapis/release-please-action@v5
+        id: release
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           target-branch: develop
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # Credit contributors in the newest CHANGELOG.md block: a per-line
+      # @handle, a Thanks list, a New Contributors welcome. Runs on the
+      # pending release branch so the credited changelog is already on `develop`
+      # by the time the release PR merges. Maintainer commits are left as-is.
+      - name: Attribute contributors in the changelog
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
+        run: |
+          branch=$(jq -r '.headBranchName // empty' <<<"$RELEASE_PR")
+          if [ -z "$branch" ]; then
+            branch=$(gh pr list --state open --label "autorelease: pending" \
+              --json headRefName --jq '.[0].headRefName')
+          fi
+          if [ -z "$branch" ]; then
+            echo "no open release PR; nothing to attribute"
+            exit 0
+          fi
+          script=$(mktemp)
+          cp .github/scripts/attribute_changelog.py "$script"
+          git fetch origin "$branch"
+          git checkout "$branch"
+          python3 "$script" CHANGELOG.md
+          if git diff --quiet -- CHANGELOG.md; then
+            echo "changelog already attributed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "docs: attribute changelog contributors"
+          git push origin "$branch"
+
+      # Replace the Release body with the credited changelog block so the
+      # credited notes are what people see on the Release page.
+      - name: Use the credited changelog block as the Release body
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: |
+          git checkout develop
+          version="${TAG#v}"
+          awk -v h="[$version](" '
+            index($0, "## " h) == 1 || index($0, "## websift: " h) == 1 { grab = 1; next }
+            grab && /^## / { exit }
+            grab { print }
+          ' CHANGELOG.md | sed '/./,$!d' > release-notes.md
+          if [ -s release-notes.md ] && grep -q '^### ' release-notes.md; then
+            gh release edit "$TAG" --notes-file release-notes.md
+          else
+            echo "no credited block for $version yet; leaving the body as-is"
+          fi
+          rm -f release-notes.md
