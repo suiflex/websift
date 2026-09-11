@@ -1,0 +1,55 @@
+# Path -> label map for the PR area labeler (the `label` job in
+# .github/workflows/suiflex.yml).
+#
+# One entry per concern: a reviewer can tell from the label row which parts
+# of the repository a pull request touches without opening the diff.
+
+"area: rust":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/**"
+          - "Cargo.toml"
+          - "Cargo.lock"
+
+"area: worker":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "browser-worker/**"
+
+"area: npm":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "npm/**"
+
+"area: packaging":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "packaging/**"
+          - "install.sh"
+          - "install.ps1"
+
+"area: migrations":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "migrations/**"
+          - "schemas/**"
+
+"area: ci":
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**"
+          - "release-please-config.json"
+          - ".release-please-manifest.json"
+          - "Makefile"
+
+"area: docs":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
+          - "LICENSE"
+          - "SECURITY.md"
+
+"area: brand":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "assets/**"
