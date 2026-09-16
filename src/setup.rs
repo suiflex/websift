@@ -288,22 +288,28 @@ fn resolve_command(command: Option<&str>) -> Result<String, String> {
         .map_err(|error| format!("'{}': {error}", resolved.display()))
 }
 
+#[cfg(not(windows))]
 fn which(name: &Path) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
-    for directory in std::env::split_paths(&path) {
-        let candidate = directory.join(name);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-        #[cfg(windows)]
-        for extension in [".exe", ".cmd", ".bat"] {
-            let candidate = directory.join(format!("{}{}", name.display(), extension));
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
+    std::env::split_paths(&path)
+        .map(|directory| directory.join(name))
+        .find(|candidate| candidate.is_file())
+}
+
+#[cfg(windows)]
+fn which(name: &Path) -> Option<PathBuf> {
+    let output = std::process::Command::new("where")
+        .arg(name)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
     }
-    None
+    String::from_utf8(output.stdout)
+        .ok()?
+        .lines()
+        .map(PathBuf::from)
+        .find(|candidate| candidate.is_file())
 }
 
 #[cfg(test)]
