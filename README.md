@@ -92,7 +92,8 @@ websift setup
 
 It asks which clients to register with (select as many as you like) and which profile to use,
 shows exactly what it will change, and writes only after you confirm. The binary is recorded by absolute path, because a
-desktop harness usually does not inherit your shell `PATH`.
+desktop harness usually does not inherit your shell `PATH`. Harness paths, entry shapes, delegated
+CLIs, JSONC merging, backups, and conflict handling are provided by the shared Kurir toolkit.
 
 For scripts, name the client instead:
 
@@ -103,23 +104,23 @@ websift setup --client codex --profile codex --dry-run   # preview, changes noth
 
 | `--client` | Where the entry goes |
 | --- | --- |
-| `claude-code` | `~/.claude.json` |
-| `claude-code-cli` | runs `claude mcp add --scope user` |
-| `claude-desktop` | `claude_desktop_config.json` in the platform support directory |
-| `codex` | runs `codex mcp add` |
-| `cursor` | `~/.cursor/mcp.json` |
-| `vscode` | runs `code --add-mcp` (GitHub Copilot) |
-| `gemini-cli` | runs `gemini mcp add -s user` |
-| `copilot-cli` | `~/.copilot/mcp-config.json` |
-| `opencode` | `~/.config/opencode/opencode.jsonc` |
-| `windsurf` | `~/.codeium/windsurf/mcp_config.json` (provisional path) |
-| `zed` | `~/.config/zed/settings.json` (provisional path) |
+| `claude-code` | Kurir merges `~/.claude.json` |
+| `claude-code-cli` | Kurir runs `claude mcp add --scope user` |
+| `claude-desktop` | Kurir merges the platform Claude Desktop config |
+| `codex` | Kurir runs `codex mcp add` |
+| `cursor` | Kurir merges `~/.cursor/mcp.json` |
+| `vscode` | Kurir runs `code --add-mcp` |
+| `gemini-cli` | Kurir runs `gemini mcp add -s user` |
+| `copilot-cli` | Kurir merges `~/.copilot/mcp-config.json` |
+| `opencode` | Kurir merges `~/.config/opencode/opencode.json` |
+| `windsurf` | Kurir merges `~/.codeium/windsurf/mcp_config.json` |
+| `zed` | Kurir merges `~/.config/zed/settings.json` |
 | `generic-json` | prints a portable snippet, writes nothing |
 
 Other flags: `--name` renames the MCP entry, `--command` points at a different binary, `--config`
-overrides the client's configuration path, `--print` shows the JSON snippet, and `--force`
-replaces an entry that already exists. Any file it rewrites is copied to `<path>.bak` first, and
-a configuration it cannot parse is reported rather than replaced.
+overrides the client's configuration path, `--print` shows the redacted registration preview, and
+`--force` replaces an entry that already exists. Kurir backs up rewritten configuration as
+`<path>.bak` and refuses to replace an invalid configuration.
 
 Then confirm the installation:
 
