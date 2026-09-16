@@ -66,6 +66,10 @@ impl Client {
     }
 
     /// Parse a `--client` value.
+    ///
+    /// # Errors
+    ///
+    /// Returns the unknown identifier when it matches no client.
     pub fn parse(value: &str) -> Result<Self, String> {
         Self::ALL
             .into_iter()
@@ -152,6 +156,11 @@ impl Default for SetupOptions {
 }
 
 /// Register the binary with a named client, or run the interactive picker.
+///
+/// # Errors
+///
+/// Returns an error when command resolution, client configuration, delegated
+/// registration, or interactive confirmation fails.
 pub fn run(options: &SetupOptions) -> Result<(), Box<dyn Error>> {
     match options.client {
         Some(client) => register_one(client, options),
