@@ -3,6 +3,13 @@
 Notable changes per release. Versions follow semantic versioning; the release tag is the version
 prefixed with `v`, which is also the tag `websift update` compares against.
 
+## [0.4.2](https://github.com/suiflex/websift/compare/v0.4.1...v0.4.2) (2026-09-16)
+
+
+### Bug Fixes
+
+* document setup errors for clippy ([25a42d2](https://github.com/suiflex/websift/commit/25a42d2c886753f4ed32aafcc816aefe35114215))
+
 ## [0.4.1](https://github.com/suiflex/websift/compare/v0.4.0...v0.4.1) (2026-09-04)
 
 
